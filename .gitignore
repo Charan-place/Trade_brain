@@ -1,0 +1,39 @@
+# ==== SECRETS — never commit ===============================================
+.env
+.env.*
+!.env.example
+.secrets/
+*.pem
+*.key
+*token*.json
+credentials*.json
+
+# ==== Market data & runtime output (large, personal, regenerable) ==========
+data/
+*.parquet
+*.jsonl
+*.log
+logs/
+
+# ==== Python ===============================================================
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ==== Editors / OS / local tools ===========================================
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+.astra/
+.claude/settings.local.json

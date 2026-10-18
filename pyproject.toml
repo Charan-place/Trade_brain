@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tbrain"
+version = "0.1.0"
+description = "Nifty 50 + Sensex options brain: live recorder, analytics, signal-only engine and live UI (personal research use)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "upstox-python-sdk>=2.30,<3",   # used ONLY for its protobuf decoder; we run our own TLS-verified websocket
+  "websocket-client>=1.6",
+  "protobuf>=5",
+  "pyarrow>=15",
+  "numpy>=1.26",
+]
+
+[project.scripts]
+tbrain = "tbrain.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tbrain"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
