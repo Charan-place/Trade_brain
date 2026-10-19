@@ -406,10 +406,15 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     if (D && D.sides) {
       $("sides").innerHTML = ["bullish", "bearish"].map((k) => {
         const sd = D.sides[k]; if (!sd) return "";
-        const items = sd.conditions.map((c) => `<li class="${c.ok ? "ok" : "no"}"><span class="ic">${c.ok ? "✓" : "·"}</span><span>${esc(c.text)}</span></li>`).join("");
+        const must = (sd.required || []).map((c) => `<li class="${c.ok ? "ok" : "no"}"><span class="ic">${c.ok ? "✓" : "✗"}</span><span><b>${esc(c.text)}</b></span></li>`).join("");
+        const items = must + sd.conditions.map((c) => `<li class="${c.ok ? "ok" : "no"}"><span class="ic">${c.ok ? "✓" : "·"}</span><span>${esc(c.text)}</span></li>`).join("");
         return `<div><b>${k === "bullish" ? "▲ Bullish" : "▼ Bearish"} ${sd.score}/${sd.max}</b> <span class="sub">(needs ${D.min_score}+ & trigger)</span>
           <ul class="check">${items}<li class="${sd.trigger ? "ok" : "no"}"><span class="ic">${sd.trigger ? "✓" : "·"}</span><span>Trigger: ${esc(sd.trigger || "no breakout of the last 10 one-minute candles")}</span></li></ul></div>`;
       }).join("");
+      const R = D.regime || {};
+      const rcls = R.label === "trend" ? "good" : R.label === "range" ? "crit" : "warn";
+      const regimeLine = R.label ? `<div style="margin:8px 0;font-size:12.5px"><span class="dot ${rcls}" style="display:inline-block;vertical-align:1px"></span> <b>Regime: ${esc(R.label)}</b> · efficiency ${R.er60 === null || R.er60 === undefined ? "—" : R.er60.toFixed(2)} · VWAP crosses (60m) ${R.vwap_crosses60 ?? "—"}${R.vs_ib ? ` · price ${esc(R.vs_ib)} initial balance` : ""}</div>` : "";
+      $("sides").insertAdjacentHTML("afterbegin", regimeLine.replace("<div", '<div style="grid-column:1/-1"'));
       const g = (D.gates || []).map((x) => `⛔ ${esc(x)}`);
       if (D.blocked) g.push(`⛔ blocked: ${esc(D.blocked)}`);
       $("gates").innerHTML = g.length ? g.join("<br>") : "✓ all gates open";
@@ -418,7 +423,9 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
       $("gates").textContent = "";
     }
     renderCallsTable(S);
-    $("sigReason").textContent = S.reason || "";
+    const SH = (S.shadow && S.shadow.by_blocker) || {};
+    const shRows = Object.entries(SH).map(([k, v]) => `<span>${esc(k)}: ${v.n} blocked · <b class="${v.sum_r < 0 ? "pos" : v.sum_r > 0 ? "neg" : ""}">${v.sum_r < 0 ? "saved" : v.sum_r > 0 ? "cost" : "±"} ${Math.abs(v.sum_r).toFixed(2)}R</b></span>`);
+    $("sigReason").innerHTML = (shRows.length ? `<div style="margin-bottom:6px"><b>Filter scorecard today</b> (shadow-tracked blocked candidates): ${shRows.join(" · ")}</div>` : "") + esc(S.reason || "");
   }
 
   // ---------- candlestick chart (shared by index + option) ----------
@@ -612,7 +619,8 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
         <span style="color:var(--crit)">Stop loss</span><span>${fmt(c.p_sl)}</span><span>${fmt(c.u_sl, 1)}${c.t1_hit ? " → BE " + fmt(c.u_sl_active, 1) : ""}</span>
         <span style="color:var(--good-ink)">Target 1</span><span>${fmt(c.p_t1)}</span><span>${fmt(c.u_t1, 1)}</span>
         <span style="color:var(--good-ink)">Target 2</span><span>${fmt(c.p_t2)}</span><span>${fmt(c.u_t2, 1)}</span></div>
-      <div class="sub">Net R:R to T1 ${fmt(c.rr_net)} · ${esc(lots)} · IV at entry ${pct(c.iv_at_entry, 1)}</div>
+      <div class="sub">Net R:R to T1 ${fmt(c.rr_net)} · ${esc(lots)} · IV at entry ${pct(c.iv_at_entry, 1)}${c.stop_via ? ` · stopped via ${esc(c.stop_via)} level` : ""}</div>
+      ${(c.correlated_with || []).length ? `<div style="margin-top:6px;font-size:12.5px;color:var(--ink)">⚠ <b>Correlated:</b> same-direction call already open on ${esc(c.correlated_with.join(", "))} — Nifty and Sensex move together, so taking both is one bet at double risk.</div>` : ""}
       <div style="margin-top:8px;font-size:12px;color:var(--ink)"><b>Why</b> · trigger: ${esc(c.trigger)}</div>
       <ul class="why">${(c.reasons || []).map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
       ${(c.evidence || []).length ? `<div style="font-size:12px;margin-top:6px"><b>Evidence · big prints on this side</b> <span class="sub">(exchange data is anonymous: what, how much, when — never who)</span></div><ul class="ev">${c.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>` : ""}`;

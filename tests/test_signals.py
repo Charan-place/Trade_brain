@@ -62,7 +62,8 @@ def test_bullish_confluence_issues_call_with_ordered_levels(tmp_path):
     assert c["action"] == "BUY CE" and c["symbol"].startswith("NIFTY 25100 CE 2026-10-27")
     assert c["u_sl"] < c["u_entry"] < c["u_t1"] < c["u_t2"]
     assert c["p_sl"] < c["entry"] < c["p_t1"] < c["p_t2"] and c["rr_net"] >= 1.5
-    assert c["label"].startswith("EXPERIMENTAL") and len(c["reasons"]) == 7
+    assert c["label"].startswith("EXPERIMENTAL") and len(c["reasons"]) == 8  # 7 clues + the trend filter
+    assert c["reasons"][0].startswith("20-min trend up")
     assert c["evidence"] and "50 lots" in c["evidence"][0] and "NIFTY FUT" in c["evidence"][0]
     lines = (tmp_path / "calls.jsonl").read_text().splitlines()
     assert json.loads(lines[0])["event"] == "issue"
@@ -150,3 +151,132 @@ def test_today_lists_every_call_with_day_summary(tmp_path):
     d = blk["today"]
     assert d["calls"] == 15 and d["closed"] == 15 and d["losses"] == 15 and d["win_rate"] == 0
     assert d["pnl_total_per_lot"] < 0 and "NIFTY" in d["by_index"]
+
+
+
+def _falling(ctx):
+    """Same bullish clues but the last 20 one-minute bars fall: a counter-trend long."""
+    bars = ctx["bars"]
+    n = len(bars)
+    ctx["bars"] = [[b[0], b[1] + (n - i) * 6, b[2] + (n - i) * 6, b[3] + (n - i) * 6, b[4] + (n - i) * 6, 0] for i, b in enumerate(bars)]
+    last = ctx["bars"][-1]; prev_hi = max(b[2] for b in ctx["bars"][-11:-1])
+    ctx["bars"][-1] = [last[0], last[1], prev_hi + 5, last[3], prev_hi + 3, 0]  # still breaks the 10-min high
+    return ctx
+
+
+def test_v2_blocks_counter_trend_call():
+    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    blk = eng.step(NOW_MS, {"NIFTY": _falling(_ctx())}, _tracker())
+    d = blk["diagnostics"]["NIFTY"]
+    assert not blk["calls"] and d["blocked"] and "trend" in d["blocked"]
+    assert d["sides"]["bullish"]["required_ok"] is False
+    off = SignalEngine(EngineConfig(trend_k=None), store_dir=None, log=lambda *a: None)  # switch off -> v1 behaviour
+    assert off.step(NOW_MS, {"NIFTY": _falling(_ctx())}, _tracker())["calls"]
+
+
+def test_v2_vwap_is_mandatory():
+    ctx = _ctx(); ctx["vwap"] = ctx["fut"] + 5      # futures BELOW vwap, everything else bullish
+    eng = SignalEngine(EngineConfig(min_score=5), store_dir=None, log=lambda *a: None)
+    blk = eng.step(NOW_MS, {"NIFTY": ctx}, _tracker())
+    assert not blk["calls"] and "VWAP" in (blk["diagnostics"]["NIFTY"]["blocked"] or "")
+
+
+def test_v2_fut_oi_needs_fresh_positions():
+    tr = FeatureTracker(); t0 = NOW_MS / 1000 - 1200
+    for i in range(1201):  # price up but OI FALLING = short covering -> no longer a point
+        tr.sample("NIFTY", t0 + i, {"cvd": 100.0 * i, "fut": 25060 + 0.05 * i, "fut_oi": 2e6 - 50 * i,
+                                    "pe_oi_near": 5e5 + 300 * i, "ce_oi_near": 5e5 + 100 * i, "straddle": 300.0})
+    eng = SignalEngine(EngineConfig(fut_oi_fresh=True), store_dir=None, log=lambda *a: None)
+    d = eng.step(NOW_MS, {"NIFTY": _ctx()}, tr)["diagnostics"]["NIFTY"]["sides"]["bullish"]
+    fo = next(c for c in d["conditions"] if c["key"] == "fut_oi")
+    assert fo["ok"] is False and "short covering" in fo["text"] and d["score"] == 6
+
+
+def test_v2_premium_stop_fires_before_index_stop(tmp_path):
+    eng = SignalEngine(EngineConfig(premium_stop=True), store_dir=None, log=lambda *a: None)
+    tr = _tracker(); ctx = _ctx()
+    (c,) = eng.step(NOW_MS, {"NIFTY": ctx}, tr)["calls"]
+    # index still ABOVE its stop, but the option collapsed (IV crush / spread) below the SL premium
+    ctx2 = dict(ctx, spot=c["u_sl"] + 2); ctx2["quotes"] = dict(ctx["quotes"])
+    ctx2["quotes"][c["instrument_key"]] = {"bp1": c["p_sl"] - 0.5, "ltp": c["p_sl"] - 0.5}
+    eng.step(NOW_MS + 60_000, {"NIFTY": ctx2}, tr)
+    c = eng.calls[c["id"]]
+    assert c["outcome"] == "SL" and c["stop_via"] == "premium" and c["r_now"] > -1.2
+    # a single bad bid with LTP still above the stop must NOT trigger it
+    eng2 = SignalEngine(EngineConfig(premium_stop=True), store_dir=None, log=lambda *a: None)
+    (d,) = eng2.step(NOW_MS, {"NIFTY": _ctx()}, _tracker())["calls"]
+    ctx3 = dict(ctx, spot=d["u_sl"] + 2); ctx3["quotes"] = dict(ctx["quotes"])
+    ctx3["quotes"][d["instrument_key"]] = {"bp1": d["p_sl"] - 0.5, "ltp": d["entry"]}
+    eng2.step(NOW_MS + 60_000, {"NIFTY": ctx3}, _tracker())
+    assert eng2.calls[d["id"]]["status"] == "open"
+
+
+def test_v21_defaults_from_backtest():
+    c = EngineConfig()
+    assert c.require_vwap and c.trend_k == 1.5
+    assert not c.premium_stop and not c.fut_oi_fresh and not c.regime_gate
+
+
+def test_v2_correlated_call_is_flagged():
+    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    tr = _tracker()
+    for i in range(1201):
+        tr.sample("SENSEX", NOW_MS / 1000 - 1200 + i, {"cvd": 100.0 * i, "fut": 82060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
+                                                     "pe_oi_near": 5e5 + 300 * i, "ce_oi_near": 5e5 + 100 * i, "straddle": 900.0})
+    blk = eng.step(NOW_MS, {"NIFTY": _ctx(), "SENSEX": _ctx(spot=82000.0)}, tr)
+    calls = sorted(blk["calls"], key=lambda c: c["und"])
+    assert len(calls) == 2 and any(c["correlated_with"] for c in calls)
+
+
+def test_v2_loss_pause_switch():
+    eng = SignalEngine(EngineConfig(loss_pause_n=2, cooldown_min=0), store_dir=None, log=lambda *a: None)
+    tr = _tracker(); t = NOW_MS
+    for i in range(2):
+        ctx = _ctx(); ctx["bars"] = [[b[0] + i * 60_000, *b[1:]] for b in ctx["bars"]]
+        c = next(x for x in eng.step(t, {"NIFTY": ctx}, tr)["calls"] if x["status"] == "open")
+        lose = dict(ctx, spot=c["u_sl"] - 1); lose["quotes"] = dict(ctx["quotes"]); lose["quotes"][c["instrument_key"]] = {"bp1": c["p_sl"]}
+        eng.step(t + 30_000, {"NIFTY": lose}, tr); t += 60_000
+    ctx = _ctx(); ctx["bars"] = [[b[0] + 2 * 60_000, *b[1:]] for b in ctx["bars"]]
+    g = eng.step(t, {"NIFTY": ctx}, tr)["diagnostics"]["NIFTY"]["gates"]
+    assert any("paused" in x for x in g)
+
+
+def test_review_report(tmp_path):
+    from tbrain.signals.review import review
+    eng = SignalEngine(EngineConfig(cooldown_min=0), store_dir=tmp_path, log=lambda *a: None)
+    tr = _tracker()
+    (c,) = eng.step(NOW_MS, {"NIFTY": _ctx()}, tr)["calls"]
+    ctx = _ctx(); lose = dict(ctx, spot=c["u_sl"] - 1); lose["quotes"] = dict(ctx["quotes"]); lose["quotes"][c["instrument_key"]] = {"bp1": c["p_sl"] - 3}
+    eng.step(NOW_MS + 60_000, {"NIFTY": lose}, tr)
+    txt = review(tmp_path / "calls.jsonl", "2026-10-20")
+    assert "ALL" in txt and "by direction" in txt and "bullish" in txt and "stop quality" in txt
+
+
+def test_shadow_tracks_blocked_candidate_to_outcome(tmp_path):
+    eng = SignalEngine(EngineConfig(), store_dir=tmp_path, log=lambda *a: None)
+    tr = _tracker()
+    ctx = _falling(_ctx())                      # blocked by the trend filter
+    blk = eng.step(NOW_MS, {"NIFTY": ctx}, tr)
+    assert not blk["calls"] and len(eng.shadows) == 1
+    (s,) = eng.shadows.values()
+    assert s["shadow"] and any("trend" in b for b in s["blocked_by"]) and s["playbook"] == "breakout"
+    assert "regime" in s and s["regime"]["label"] in ("trend", "range", "mixed", "unknown")
+    eng.step(NOW_MS + 30_000, {"NIFTY": ctx}, tr)  # same bar: no duplicate shadow
+    assert len(eng.shadows) == 1
+    win = dict(ctx, spot=s["u_t2"] + 1); win["quotes"] = dict(ctx["quotes"]); win["quotes"][s["instrument_key"]] = {"bp1": s["p_t2"], "ltp": s["p_t2"]}
+    eng.step(NOW_MS + 60_000, {"NIFTY": dict(ctx, spot=s["u_t1"] + 1, quotes={**ctx["quotes"], s["instrument_key"]: {"bp1": s["p_t1"], "ltp": s["p_t1"]}})}, tr)
+    blk = eng.step(NOW_MS + 120_000, {"NIFTY": win}, tr)
+    assert eng.shadows[s["id"]]["outcome"] == "T2"
+    tf = blk["shadow"]["by_blocker"]["trend filter"]
+    assert tf["n"] == 1 and tf["sum_r"] > 0          # the filter would have COST money on this one
+    assert (tmp_path / "shadow.jsonl").exists() and not (tmp_path / "calls.jsonl").exists()
+    again = SignalEngine(EngineConfig(), store_dir=tmp_path, log=lambda *a: None)
+    assert again.shadows[s["id"]]["outcome"] == "T2"  # survives restarts
+
+
+def test_regime_gate_switch():
+    eng = SignalEngine(EngineConfig(regime_gate=True), store_dir=None, log=lambda *a: None)
+    blk = eng.step(NOW_MS, {"NIFTY": _ctx()}, _tracker())   # fixture bars are a gentle drift -> not 'trend'
+    d = blk["diagnostics"]["NIFTY"]
+    if d["regime"]["label"] != "trend":
+        assert not blk["calls"] and any("regime gate" in g for g in d["gates"]) and eng.shadows

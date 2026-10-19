@@ -180,9 +180,11 @@ class BrainState:
     def _fut_key(self, und: str, latest: dict) -> str | None:
         return next((k for k, c in self.meta.items() if c.underlying == und and c.kind == "FUT" and k in latest), None)
 
-    def snapshot(self, feed: dict | None = None, mode: str = "live") -> dict:
+    def snapshot(self, feed: dict | None = None, mode: str = "live", now_ns: int | None = None) -> dict:
+        """now_ns lets the replay backtester run the brain on recorded (simulated) time."""
         t0 = time.perf_counter()
-        now_ns = time.time_ns()
+        now_ns = now_ns or time.time_ns()
+        now_dt = datetime.fromtimestamp(now_ns / 1e9, IST)
         show_keys = self.engine.display_keys() if self.engine else []
         with self._lock:  # copy only; heavy maths happens after the lock is released so ticks are never blocked
             latest = {k: dict(v) for k, v in self.latest.items()}
@@ -194,9 +196,9 @@ class BrainState:
             last_recv = self._last_recv_ns
             now_ms = now_ns / 1e6
             idx_bars = {u: self.candles.series(k, CHART_BARS) for u, k in self.index_keys.items()}
-            idx_done = {u: self.candles.completed(k, now_ms, 60) for u, k in self.index_keys.items()}
+            idx_done = {u: self.candles.completed(k, now_ms, CHART_BARS) for u, k in self.index_keys.items()}
             call_bars = {k: self.candles.series(k, 120) for k in show_keys}
-        unds = {u: self._underlying(u, k, latest, first, prev_oi, mode, flows[u]) for u, k in self.index_keys.items()}
+        unds = {u: self._underlying(u, k, latest, first, prev_oi, mode, flows[u], now_dt) for u, k in self.index_keys.items()}
         feed = feed or {}
         feed_age = (now_ns - last_recv) / 1e9 if last_recv else None
         market = feed.get("market_status") or {}
@@ -220,7 +222,7 @@ class BrainState:
                 "straddle": nearest.get("straddle") if nearest else None, "ce_oi_near": ce_near, "pe_oi_near": pe_near})
             seg = self.segment.get(u)
             ctxs[u] = {
-                "live": mode == "live" and in_market_hours() and market.get(seg) == "NORMAL_OPEN",
+                "live": mode == "live" and in_market_hours(now_dt) and market.get(seg) == "NORMAL_OPEN",
                 "feed_age": feed_age, "spot": U["spot"], "fut": fut.get("ltp"), "vwap": vwap,
                 "flow": flows[u], "big_net": bigs[u]["net_5m"], "big_tape": bigs[u]["tape"], "bars": idx_done[u], "chains": U["chains"],
                 "lot": U["lot_size"], "r": self.r, "quotes": latest,
@@ -230,6 +232,7 @@ class BrainState:
             if U["vwap_index_equiv"] and mode == "live":
                 self.record_vwap(u, now_ms, U["vwap_index_equiv"])
             U["vwap_series"] = sorted(self.vwap_hist.get(u, {}).items())
+            ctxs[u]["vwap_index"] = U["vwap_index_equiv"]
         if self.engine:
             signals = self.engine.step(now_ms, ctxs, self.tracker)
             for c in signals["calls"]:
@@ -245,12 +248,13 @@ class BrainState:
                                for u, k in self.index_keys.items()},
             "compute_ms": None,
         }
-        out = {"generated_at": now_ist().isoformat(), "generated_ms": now_ms, "mode": mode, "feed": feed,
+        out = {"generated_at": now_dt.isoformat(), "generated_ms": now_ms, "mode": mode, "feed": feed,
                "latency": latency, "underlyings": unds, "brain": self._layers(feed, unds, signals), "signals": signals}
         latency["compute_ms"] = (time.perf_counter() - t0) * 1000
         return _round(out)
 
-    def _underlying(self, und, ikey, latest, first, prev_oi, mode, flow) -> dict:
+    def _underlying(self, und, ikey, latest, first, prev_oi, mode, flow, now_dt=None) -> dict:
+        now_dt = now_dt or now_ist()
         idx = latest.get(ikey, {})
         spot = idx.get("ltp") or idx.get("cp")
         fut_key = self._fut_key(und, latest)
@@ -272,8 +276,8 @@ class BrainState:
         chains = {}
         for exp in sorted(legs_by_exp)[:3]:
             legs = legs_by_exp[exp]
-            if mode == "live" and in_market_hours():
-                val = now_ist()
+            if mode == "live" and in_market_hours(now_dt):
+                val = now_dt
             else:  # after hours / demo: value at the time the prices were made, not "now"
                 ltts = [l["ltt_ms"] for l in legs if l.get("ltt_ms")]
                 val = datetime.fromtimestamp(max(ltts) / 1000, IST) if ltts else now_ist()
