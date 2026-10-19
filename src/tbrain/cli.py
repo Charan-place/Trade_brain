@@ -1,4 +1,4 @@
-"""tbrain CLI:  login | check | instruments | probe | record | report | ui"""
+"""tbrain CLI:  login | check | instruments | probe | record | report | review | backtest | ui"""
 from __future__ import annotations
 
 import argparse
@@ -89,6 +89,25 @@ def cmd_report(s: Settings, a) -> int:
     return 0
 
 
+def cmd_review(s: Settings, a) -> int:
+    from tbrain.signals.review import review
+    print(review(s.data_dir / "signals" / "calls.jsonl", None if a.all else (a.date or ist_date().isoformat())))
+    return 0
+
+
+def cmd_backtest(s: Settings, a) -> int:
+    from tbrain.backtest.replay import PRESETS, fidelity, format_result, preset, replay_day
+    from tbrain.signals.review import load_calls
+    names = list(PRESETS) if a.compare else [a.config]
+    live = [c for c in load_calls(s.data_dir / "signals" / "calls.jsonl") if c.get("issued_at", "").startswith(a.date)]
+    for n in names:
+        res = replay_day(s.data_dir, a.date, preset(n), step_s=a.step, risk_free=s.risk_free, vix_key=s.vix_key)
+        print(f"\n=== {n} ===\n" + format_result(res))
+        if n == "v1" and live:
+            print(f"   fidelity vs live session: {fidelity(live, res['calls'])}")
+    return 0
+
+
 def cmd_ui(s: Settings, a) -> int:
     from tbrain.ui.server import serve
     serve(s, port=a.port, force_demo=a.demo, open_browser=not a.no_browser)
@@ -116,6 +135,14 @@ def main(argv: list[str] | None = None) -> int:
     x = sub.add_parser("report", help="coverage/gap report for a recorded day")
     x.add_argument("--date", default=None)
     x.add_argument("--top", type=int, default=15)
+    x = sub.add_parser("review", help="post-mortem of a day's calls (direction, hour, score, outcome, stop/exit quality)")
+    x.add_argument("--date", default=None)
+    x.add_argument("--all", action="store_true", help="all recorded days")
+    x = sub.add_parser("backtest", help="replay a recorded day through the real brain + engine (v1 / v2 / v2.1 / v2.1+regime)")
+    x.add_argument("--date", required=True)
+    x.add_argument("--config", default="v2.1", choices=["v1", "v2", "v2.1", "v2.1+regime"])
+    x.add_argument("--compare", action="store_true", help="run all presets")
+    x.add_argument("--step", type=float, default=1.0, help="simulated seconds between brain snapshots (live = 0.25)")
     x = sub.add_parser("ui", help="open the brain UI (live while `record` runs; replays the last probe otherwise)")
     x.add_argument("--port", type=int, default=8765)
     x.add_argument("--demo", action="store_true", help="force replay of the latest probe")
@@ -124,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     s = Settings.load()
     try:
         return {"login": cmd_login, "check": cmd_check, "instruments": cmd_instruments, "probe": cmd_probe,
-                "record": cmd_record, "report": cmd_report, "ui": cmd_ui}[a.cmd](s, a)
+                "record": cmd_record, "report": cmd_report, "ui": cmd_ui, "review": cmd_review, "backtest": cmd_backtest}[a.cmd](s, a)
     except Exception as e:  # concise errors; no secrets are ever in messages
         print(f"error: {e}", file=sys.stderr)
         return 1

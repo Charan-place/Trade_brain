@@ -170,7 +170,10 @@ class Recorder:
         if self.write:  # live recording only: probes / replays never issue calls
             from tbrain.signals.engine import EngineConfig, SignalEngine
             engine = SignalEngine(EngineConfig(min_score=self.s.signal_min_score, cost_per_lot_inr=self.s.cost_per_lot_inr,
-                                               risk_per_trade_inr=self.s.risk_per_trade_inr),
+                                               risk_per_trade_inr=self.s.risk_per_trade_inr, require_vwap=self.s.require_vwap,
+                                               trend_k=self.s.trend_k, loss_pause_n=self.s.loss_pause_n,
+                                               regime_gate=self.s.regime_gate, premium_stop=self.s.premium_stop,
+                                               fut_oi_fresh=self.s.fut_oi_fresh),
                                   store_dir=self.s.data_dir / "signals", log=self.log)
         self.brain = BrainState(contracts, self.index_keys, self.s.vix_key, self.s.risk_free,
                                 count_recorded_sessions(self.s.data_dir), engine=engine)

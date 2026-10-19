@@ -116,7 +116,7 @@ Upstox requires a **fresh login every day**.
 | **≈09:30** | Earliest possible call (needs 15 one-minute candles; entry window is 09:25–14:45) |
 | **During the day** | Watch *Brain thinking* to see why there is / isn't a call. On a call: chime + notification + banner |
 | **15:35** | Recorder stops by itself (or Ctrl+C any time — data is saved) |
-| **After close** | `uv run tbrain report` → coverage and gaps for the day |
+| **After close** | `uv run tbrain report` → coverage and gaps · `uv run tbrain review` → what worked / leaked today |
 
 What the two processes are:
 - **Backend** = `tbrain record` (recorder + brain + signal engine + UI server, all in one process).
@@ -179,6 +179,8 @@ The brain only suggests. If **you** choose to act on a call:
 | `uv run tbrain record --no-ui` / `--no-browser` / `--ui-port 8766` | Variants |
 | `uv run tbrain ui [--demo]` | UI without recording (last session or probe replay) |
 | `uv run tbrain report [--date YYYY-MM-DD]` | Coverage + gap report for a recorded day |
+| `uv run tbrain review [--date YYYY-MM-DD \| --all]` | Post-mortem of calls: by direction, hour, score, regime, outcome; stop/exit quality; **filter scorecard** from shadow calls |
+| `uv run tbrain backtest --date YYYY-MM-DD [--compare]` | Replay a recorded day through the real brain + engine (presets v1 / v2 / v2.1 / v2.1+regime; default v2.1); fidelity check vs the live session |
 
 ---
 
@@ -191,6 +193,12 @@ The brain only suggests. If **you** choose to act on a call:
 | `TBRAIN_COST_PER_LOT` | `40` | Your **full** round-trip cost per lot (₹). Placeholder — set yours |
 | `TBRAIN_RISK_PER_TRADE` | `0` | Max ₹ risk per call; enables the lot-size hint |
 | `TBRAIN_SIGNAL_MIN_SCORE` | `5` | Conditions (of 7) that must agree; higher = fewer, stricter calls |
+| `TBRAIN_REQUIRE_VWAP` | `1` | v2: futures must be on the call's side of VWAP |
+| `TBRAIN_TREND_K` | `1.5` | v2: last-60-min index move must be ≥ k × ATR in the call's direction (`off` disables) |
+| `TBRAIN_LOSS_PAUSE_N` | `0` | Pause an index after N consecutive SLs (off by default) |
+| `TBRAIN_REGIME_GATE` | `0` | Breakout calls only in a `trend` regime |
+| `TBRAIN_PREMIUM_STOP` | `0` | Also stop when the option bid+LTP hit the SL premium |
+| `TBRAIN_FUT_OI_FRESH` | `0` | Futures-OI clue needs OI rising with price |
 | `TBRAIN_N_STRIKES` / `TBRAIN_N_EXPIRIES` | `10` / `2` | Chain width recorded |
 | `TBRAIN_UNDERLYINGS` | `NIFTY:NSE_FO,SENSEX:BSE_FO` | What to record |
 | `TBRAIN_RISK_FREE` | `0.065` | Discount rate for Black-76 (placeholder) |
@@ -256,8 +264,11 @@ protobuf schema). Secrets live only in `.env` / `.secrets/`. The UI binds to `12
 - [x] Phase 0–1: Upstox adapter, recorder, health, tests
 - [x] Phase 2: own IV/Greeks, chain analytics, brain UI (push, 250 ms), live candles
 - [x] Signal engine v1 (EXPERIMENTAL) with SL/targets, live P&L, scoreboard, alerts
-- [ ] Record 20+ sessions → evaluate each condition's real hit-rate from `calls.jsonl`
-- [ ] Replay backtester over recorded parquet + honest cost model
+- [x] Signal filters v2 (trend + VWAP required, fresh-OI clue, premium stop) — validated by replay
+- [x] Shadow calls (every blocked candidate tracked → per-filter scorecard) + `tbrain review`
+- [x] Replay backtester over recorded parquet (`tbrain backtest`) with fidelity check vs live
+- [x] Regime brain (trend / range / mixed: efficiency, VWAP crosses, initial balance) + range-fade playbook in shadow
+- [ ] Record 20+ sessions → evaluate each condition's real hit-rate; ML meta-labelling on shadow + live candidates
 - [ ] Regime + volatility models, calibrated probabilities (replace rule score)
 - [ ] Always-on server deployment (Mumbai VM) with a phone-friendly login link
 

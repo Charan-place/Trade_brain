@@ -80,6 +80,12 @@ class Settings:
     signal_min_score: int = 5
     cost_per_lot_inr: float = 40.0
     risk_per_trade_inr: float = 0.0
+    require_vwap: bool = True
+    trend_k: float | None = 1.5
+    loss_pause_n: int = 0
+    regime_gate: bool = False
+    premium_stop: bool = False
+    fut_oi_fresh: bool = False
 
     @classmethod
     def load(cls) -> "Settings":
@@ -101,6 +107,12 @@ class Settings:
             signal_min_score=_int(e, "TBRAIN_SIGNAL_MIN_SCORE", 5),
             cost_per_lot_inr=float(e.get("TBRAIN_COST_PER_LOT", 40.0)),
             risk_per_trade_inr=float(e.get("TBRAIN_RISK_PER_TRADE", 0.0)),
+            require_vwap=e.get("TBRAIN_REQUIRE_VWAP", "1") not in ("0", "false", "False", "off"),
+            trend_k=None if e.get("TBRAIN_TREND_K", "1.5").lower() in ("off", "none", "") else float(e.get("TBRAIN_TREND_K", "1.5")),
+            loss_pause_n=_int(e, "TBRAIN_LOSS_PAUSE_N", 0),
+            regime_gate=e.get("TBRAIN_REGIME_GATE", "0") in ("1", "true", "True", "on"),
+            premium_stop=e.get("TBRAIN_PREMIUM_STOP", "0") in ("1", "true", "True", "on"),
+            fut_oi_fresh=e.get("TBRAIN_FUT_OI_FRESH", "0") in ("1", "true", "True", "on"),
         )
 
     def require_app_credentials(self) -> None:
