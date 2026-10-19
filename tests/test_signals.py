@@ -131,3 +131,22 @@ def test_oi_wall_before_target_blocks(tmp_path):
     eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
     blk = eng.step(NOW_MS, {"NIFTY": _ctx(spot=25130.0, wall_far=False)}, _tracker())  # call wall 25150 < T1
     assert not blk["calls"] and "wall" in (blk["diagnostics"]["NIFTY"]["blocked"] or "")
+
+
+def test_today_lists_every_call_with_day_summary(tmp_path):
+    eng = SignalEngine(EngineConfig(cooldown_min=0), store_dir=None, log=lambda *a: None)
+    tr = _tracker()
+    t = NOW_MS
+    for i in range(15):  # issue -> stop out -> issue again: 15 calls in one day
+        ctx = _ctx()
+        ctx["bars"] = [[b[0] + i * 60_000, *b[1:]] for b in ctx["bars"]]
+        blk = eng.step(t, {"NIFTY": ctx}, tr)
+        c = next(x for x in blk["calls"] if x["status"] == "open")
+        lose = dict(ctx, spot=c["u_sl"] - 1); lose["quotes"] = dict(ctx["quotes"]); lose["quotes"][c["instrument_key"]] = {"bp1": c["p_sl"]}
+        eng.step(t + 30_000, {"NIFTY": lose}, tr)
+        t += 60_000
+    blk = eng.step(t, {"NIFTY": dict(_ctx(), live=False)}, tr)
+    assert len(blk["calls"]) == 15                       # not truncated to the most recent few
+    d = blk["today"]
+    assert d["calls"] == 15 and d["closed"] == 15 and d["losses"] == 15 and d["win_rate"] == 0
+    assert d["pnl_total_per_lot"] < 0 and "NIFTY" in d["by_index"]

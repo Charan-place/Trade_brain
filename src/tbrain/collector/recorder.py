@@ -174,6 +174,16 @@ class Recorder:
                                   store_dir=self.s.data_dir / "signals", log=self.log)
         self.brain = BrainState(contracts, self.index_keys, self.s.vix_key, self.s.risk_free,
                                 count_recorded_sessions(self.s.data_dir), engine=engine)
+        try:  # restart-safe: rebuild today's candles + VWAP from what was already recorded
+            from tbrain.collector.backfill import backfill_today
+            futs = {u: ins.nearest_future(contracts, u, today).instrument_key
+                    for u in self.index_keys if ins.nearest_future(contracts, u, today)}
+            keys = set(self.index_keys.values()) | set(futs.values())
+            if engine:
+                keys |= {c["instrument_key"] for c in engine.today_calls()}
+            backfill_today(self.brain, self.s.data_dir / "ticks", today.isoformat(), keys, futs, log=self.log)
+        except Exception as e:
+            self.log(f"[backfill] skipped: {e!r}")
         self._start_ui()
 
         if respect_hours:

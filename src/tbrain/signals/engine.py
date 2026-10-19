@@ -101,7 +101,7 @@ class SignalEngine:
                 self.diag[und] = self._evaluate(und, ctx, tracker, now_ms)
             except Exception as e:  # a rule bug must never kill the brain loop
                 self.diag[und] = {"gates": [f"engine error: {e!r}"], "sides": {}}
-        return self._block()
+        return self._block(now_ms)
 
     # ------------------------------------------------------------ evaluation
     def _evaluate(self, und: str, ctx: dict, tr, now_ms: float) -> dict:
@@ -338,12 +338,34 @@ class SignalEngine:
                 "avg_r": sum(c["r_now"] for c in closed) / n, "total_pnl_per_lot": sum(c["pnl_per_lot"] for c in closed),
                 "by_outcome": {o: sum(1 for c in closed if c["outcome"] == o) for o in ("T2", "BREAKEVEN", "SL", "TIME")}}
 
-    def _block(self) -> dict:
+    def today_calls(self, now_ms: float | None = None) -> list[dict]:
+        """Every call issued today (IST) plus any still-open older call, newest first."""
+        day = datetime.fromtimestamp((now_ms or time.time() * 1000) / 1000, IST).date()
+        out = [c for c in self.calls.values()
+               if datetime.fromtimestamp(c["issued_ms"] / 1000, IST).date() == day or c["status"] in ("open", "t1")]
+        return sorted(out, key=lambda c: c["issued_ms"], reverse=True)
+
+    @staticmethod
+    def summarize(calls: list[dict]) -> dict:
+        closed = [c for c in calls if c["status"] == "closed" and c["outcome"] != "NO_DATA"]
+        pnl_closed = sum(c["pnl_per_lot"] for c in closed)
+        pnl_open = sum(c["pnl_per_lot"] for c in calls if c["status"] != "closed")
+        wins = sum(1 for c in closed if c["pnl_per_lot"] > 0)
+        return {"calls": len(calls), "closed": len(closed), "open": len(calls) - len(closed),
+                "wins": wins, "losses": len(closed) - wins, "win_rate": wins / len(closed) if closed else None,
+                "hit_t1": sum(c["t1_hit"] for c in closed) / len(closed) if closed else None,
+                "pnl_closed_per_lot": pnl_closed, "pnl_open_per_lot": pnl_open, "pnl_total_per_lot": pnl_closed + pnl_open,
+                "avg_r": sum(c["r_now"] for c in closed) / len(closed) if closed else None,
+                "by_index": {u: round(sum(c["pnl_per_lot"] for c in calls if c["und"] == u), 2)
+                             for u in sorted({c["und"] for c in calls})}}
+
+    def _block(self, now_ms: float | None = None) -> dict:
         opened = [c for c in self.calls.values() if c["status"] in ("open", "t1")]
-        return {"status": "live" if opened else "experimental", "label": LABEL,
+        today = self.today_calls(now_ms)
+        return {"status": "live" if opened else "experimental", "label": LABEL, "today": self.summarize(today),
                 "reason": "Rule-based calls with no track record yet: treat every call as an experiment until the "
                           "scoreboard has dozens of closed calls.",
-                "calls": self._recent(12), "open_ids": [c["id"] for c in opened],
+                "calls": today, "open_ids": [c["id"] for c in opened],
                 "diagnostics": self.diag, "scoreboard": self.scoreboard(),
                 "rules": {"min_score": self.cfg.min_score, "t1_r": self.cfg.t1_r, "t2_r": self.cfg.t2_r,
                           "min_rr_net": self.cfg.min_rr_net, "time_stop_min": self.cfg.time_stop_min,

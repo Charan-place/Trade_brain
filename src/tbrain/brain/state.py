@@ -26,7 +26,7 @@ BIG_PCTL = 0.99         # ... and above this percentile of the instrument's own 
 BIG_KEEP_S = 900
 _DEPTH_KEYS = [f"{s}{n}" for n in range(1, DEPTH + 1) for s in ("bp", "bq", "ap", "aq")]
 MIN_SESSIONS_FOR_TRAINING = 20
-CHART_BARS = 180
+CHART_BARS = 400  # a full NSE/BSE session is 375 one-minute bars
 
 
 def _t_years(expiry, val: datetime) -> float:
@@ -54,6 +54,7 @@ class BrainState:
         self.tracker = FeatureTracker()
         self._lags_ms: deque = deque(maxlen=400)
         self._last_recv_ns = 0
+        self.vwap_hist: dict[str, dict[int, float]] = {}   # und -> minute -> index-equivalent VWAP
         self.segment = {}
         for c in contracts:
             self.segment.setdefault(c.underlying, c.segment)
@@ -92,6 +93,13 @@ class BrainState:
                 if px:
                     ts = r.get("ltt_ms") or (r.get("recv_ns") or time.time_ns()) // 1_000_000
                     self.candles.update(k, ts, px, dv)
+
+    def record_vwap(self, und: str, ts_ms: float, value: float) -> None:
+        h = self.vwap_hist.setdefault(und, {})
+        h[int(ts_ms) - int(ts_ms) % 60_000] = value
+        if len(h) > CHART_BARS:
+            for k in sorted(h)[: len(h) - CHART_BARS]:
+                del h[k]
 
     def ingest_chain(self, chain_rows: list[dict]) -> None:
         with self._lock:
@@ -219,6 +227,9 @@ class BrainState:
             }
             U["vwap"] = vwap
             U["vwap_index_equiv"] = (vwap - U["future"]["basis"]) if vwap and U["future"].get("basis") is not None else None
+            if U["vwap_index_equiv"] and mode == "live":
+                self.record_vwap(u, now_ms, U["vwap_index_equiv"])
+            U["vwap_series"] = sorted(self.vwap_hist.get(u, {}).items())
         if self.engine:
             signals = self.engine.step(now_ms, ctxs, self.tracker)
             for c in signals["calls"]:
