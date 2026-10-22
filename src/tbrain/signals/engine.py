@@ -108,6 +108,7 @@ class SignalEngine:
         self._last_issue_ms: dict[str, float] = {}
         self._issued_bar: dict[str, int] = {}
         self._shadow_bar: dict[tuple, int] = {}
+        self.on_event = None  # optional hook (event, call) -> None, e.g. MongoSink.on_call_event; must not raise
         self._load()
 
     # ------------------------------------------------------------ persistence
@@ -128,11 +129,15 @@ class SignalEngine:
 
     def _append(self, event: str, call: dict) -> None:
         p = self._path(bool(call.get("shadow")))
-        if not p:
-            return
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with p.open("a") as f:
-            f.write(json.dumps({"event": event, "ts": time.time(), "call": call}, default=str) + "\n")
+        if p:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("a") as f:
+                f.write(json.dumps({"event": event, "ts": time.time(), "call": call}, default=str) + "\n")
+        if self.on_event is not None:
+            try:
+                self.on_event(event, call)
+            except Exception as e:  # noqa: BLE001 - a storage hook must never break signal tracking
+                self.log(f"[signal] storage hook failed: {e!r}")
 
     def display_keys(self) -> list[str]:
         return [c["instrument_key"] for c in self._recent(8)]

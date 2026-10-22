@@ -33,6 +33,9 @@ def _parse_underlyings(raw: str) -> tuple[tuple[str, str], ...]:
     return tuple(out)
 
 
+ENV_PREFIXES = ("UPSTOX_", "TBRAIN_", "MONGODB_", "GOOGLE_")
+
+
 def load_env(path: Path | None = None) -> dict[str, str]:
     path = path or (ROOT / ".env")
     env: dict[str, str] = {}
@@ -44,7 +47,7 @@ def load_env(path: Path | None = None) -> dict[str, str]:
             k, v = line.split("=", 1)
             env[k.strip().upper()] = v.strip().strip('"').strip("'")
     for k, v in os.environ.items():
-        if k.upper().startswith(("UPSTOX_", "TBRAIN_")):
+        if k.upper().startswith(ENV_PREFIXES):
             env[k.upper()] = v
     return env
 
@@ -86,6 +89,17 @@ class Settings:
     regime_gate: bool = False
     premium_stop: bool = False
     fut_oi_fresh: bool = False
+    # Storage (optional): MongoDB keeps calls, shadows, minute features and sessions for training. Empty = off.
+    mongodb_uri: str = field(default="", repr=False)
+    mongodb_db: str = "tbrain"
+    # Hosted web app (optional): Google sign-in + per-user Upstox connect.
+    public_url: str = ""
+    google_client_id: str = field(default="", repr=False)
+    google_client_secret: str = field(default="", repr=False)
+    allowed_emails: tuple[str, ...] = ()
+    owner_email: str = ""
+    session_secret: str = field(default="", repr=False)
+    encryption_key: str = field(default="", repr=False)
 
     @classmethod
     def load(cls) -> "Settings":
@@ -113,6 +127,17 @@ class Settings:
             regime_gate=e.get("TBRAIN_REGIME_GATE", "0") in ("1", "true", "True", "on"),
             premium_stop=e.get("TBRAIN_PREMIUM_STOP", "0") in ("1", "true", "True", "on"),
             fut_oi_fresh=e.get("TBRAIN_FUT_OI_FRESH", "0") in ("1", "true", "True", "on"),
+            data_dir=Path(e["TBRAIN_DATA_DIR"]) if e.get("TBRAIN_DATA_DIR") else cls.data_dir,
+            secrets_dir=Path(e["TBRAIN_SECRETS_DIR"]) if e.get("TBRAIN_SECRETS_DIR") else cls.secrets_dir,
+            mongodb_uri=e.get("MONGODB_URI", ""),
+            mongodb_db=e.get("MONGODB_DB", "tbrain") or "tbrain",
+            public_url=e.get("TBRAIN_PUBLIC_URL", "").rstrip("/"),
+            google_client_id=e.get("GOOGLE_CLIENT_ID", ""),
+            google_client_secret=e.get("GOOGLE_CLIENT_SECRET", ""),
+            allowed_emails=tuple(x.strip().lower() for x in e.get("TBRAIN_ALLOWED_EMAILS", "").split(",") if x.strip()),
+            owner_email=(e.get("TBRAIN_OWNER_EMAIL", "") or e.get("TBRAIN_ALLOWED_EMAILS", "").split(",")[0]).strip().lower(),
+            session_secret=e.get("TBRAIN_SESSION_SECRET", ""),
+            encryption_key=e.get("TBRAIN_ENCRYPTION_KEY", ""),
         )
 
     def require_app_credentials(self) -> None:

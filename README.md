@@ -22,6 +22,8 @@ calls** (option, expiry, entry, stop loss, targets, reasons) that it then tracks
 9. [Troubleshooting](#9-troubleshooting)
 10. [Development](#10-development)
 11. [Roadmap](#11-roadmap)
+12. [MongoDB (training data)](#12-mongodb-training-data)
+13. [Deploy on Modal (hosted, Google sign-in)](#13-deploy-on-modal-hosted-google-sign-in)
 
 ---
 
@@ -180,6 +182,8 @@ The brain only suggests. If **you** choose to act on a call:
 | `uv run tbrain ui [--demo]` | UI without recording (last session or probe replay) |
 | `uv run tbrain report [--date YYYY-MM-DD]` | Coverage + gap report for a recorded day |
 | `uv run tbrain review [--date YYYY-MM-DD \| --all]` | Post-mortem of calls: by direction, hour, score, regime, outcome; stop/exit quality; **filter scorecard** from shadow calls |
+| `uv run tbrain mongo ping` / `uv run tbrain mongo import [--date D \| --all]` | Check MongoDB; copy saved calls, shadows, sessions + daily summaries into it (safe to re-run) |
+| `uv run tbrain web` | The hosted web app locally (Google sign-in + dashboard) on http://127.0.0.1:8765 |
 | `uv run tbrain backtest --date YYYY-MM-DD [--compare]` | Replay a recorded day through the real brain + engine (presets v1 / v2 / v2.1 / v2.1+regime; default v2.1); fidelity check vs the live session |
 
 ---
@@ -202,6 +206,13 @@ The brain only suggests. If **you** choose to act on a call:
 | `TBRAIN_N_STRIKES` / `TBRAIN_N_EXPIRIES` | `10` / `2` | Chain width recorded |
 | `TBRAIN_UNDERLYINGS` | `NIFTY:NSE_FO,SENSEX:BSE_FO` | What to record |
 | `TBRAIN_RISK_FREE` | `0.065` | Discount rate for Black-76 (placeholder) |
+| `MONGODB_URI`, `MONGODB_DB` | — / `tbrain` | Optional. Saves calls, shadows, minute features, sessions to MongoDB (section 12) |
+| `TBRAIN_DATA_DIR`, `TBRAIN_SECRETS_DIR` | `data/`, `.secrets/` | Where files go (set automatically on Modal) |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | Hosted app: Google sign-in (section 13) |
+| `TBRAIN_ALLOWED_EMAILS` | — | Hosted app: comma-separated Gmail addresses allowed in; `*` = any verified Google account |
+| `TBRAIN_OWNER_EMAIL` | first allowed email | Hosted app: the account whose Upstox login feeds the brain |
+| `TBRAIN_SESSION_SECRET`, `TBRAIN_ENCRYPTION_KEY` | — | Hosted app: cookie signing key; Fernet key that encrypts Upstox tokens in MongoDB |
+| `TBRAIN_PUBLIC_URL` | — | Hosted app: its https address (used for redirects and secure cookies) |
 
 ---
 
@@ -212,6 +223,7 @@ All runtime data is **git-ignored**.
 data/ticks/date=YYYY-MM-DD/*.parquet   every feed update (one row per instrument per message)
 data/chain/date=YYYY-MM-DD/*.parquet   REST option-chain snapshots (prev_oi, PCR, POP)
 data/signals/calls.jsonl               every call + T1/close events (the scoreboard)
+data/signals/shadow.jsonl              every blocked candidate, tracked to its outcome (filter scorecard)
 data/sessions/session_*.json           per-session manifest (subscriptions, health, gaps)
 data/live/state.json                   last brain snapshot (for `tbrain ui` after hours)
 data/instruments/contracts_*.json      filtered NIFTY/SENSEX contracts per day
@@ -270,7 +282,88 @@ protobuf schema). Secrets live only in `.env` / `.secrets/`. The UI binds to `12
 - [x] Regime brain (trend / range / mixed: efficiency, VWAP crosses, initial balance) + range-fade playbook in shadow
 - [ ] Record 20+ sessions → evaluate each condition's real hit-rate; ML meta-labelling on shadow + live candidates
 - [ ] Regime + volatility models, calibrated probabilities (replace rule score)
-- [ ] Always-on server deployment (Mumbai VM) with a phone-friendly login link
+- [x] MongoDB training store (calls, shadows, minute features, sessions, daily summaries)
+- [x] Hosted deployment on Modal (Mumbai) with Google sign-in and one-click daily Upstox connect
+- [ ] Multi-user: each user connects their own Upstox and runs their own brain (needs per-user workers; check SEBI/Upstox terms first)
+
+---
+
+## 12. MongoDB (training data)
+
+Raw ticks stay in Parquet (≈0.4 GB/day — too big for a free cluster). MongoDB keeps the compact, labelled data a
+model learns from:
+
+| Collection | One document per | Holds |
+|---|---|---|
+| `calls` | real call | everything the brain saw at entry (clues, regime, levels, prices) + event history + outcome (R, ₹/lot) |
+| `shadows` | blocked candidate | same as calls + which filter blocked it — the negative/positive examples |
+| `features` | underlying × minute | spot, VWAP, ATR, regime, order flow, big prints, chain (IV, skew, PCR, max pain, walls), clue values |
+| `daily` | day | summary + filter scorecard + rules in force |
+| `sessions` | recorder run | health/gap manifest |
+| `users`, `upstox_tokens` | Google account | hosted-app users; their Upstox token **encrypted** (Fernet) |
+
+Setup (free):
+1. [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) → create a free **M0** cluster on **AWS Mumbai (ap-south-1)**.
+2. *Database Access* → add a user with a long random password. *Network Access* → `0.0.0.0/0` (Modal has no fixed IP
+   on the free plan; the password protects it).
+3. *Connect → Drivers* → copy the `mongodb+srv://…` string into `.env` as `MONGODB_URI=` (never commit it).
+4. `uv sync --all-extras` then `uv run tbrain mongo ping` → `uv run tbrain mongo import --all` (copies past days).
+
+From then on `tbrain record` writes to MongoDB live (non-blocking: if Mongo is down, recording continues and files
+on disk remain the source of truth). Free-tier limits: 0.5 GB storage, 100 ops/s — the brain uses a few docs/second.
+
+---
+
+## 13. Deploy on Modal (hosted, Google sign-in)
+
+What you get: a private `https://…modal.run` address. Sign in with Google → live dashboard on phone/laptop.
+Each morning tap **Connect Upstox** (Upstox tokens expire daily) → the brain starts within a minute and runs until
+15:35 IST. A 09:00 IST weekday schedule also starts it if you connected earlier. Signal-only: it never places orders.
+
+**Cost:** Modal's Starter plan includes $30/month of free credit; ~7 h/day on 1 CPU + 2 GB in Mumbai is estimated at
+roughly $11–17/month from Modal's published per-second prices (check the Modal dashboard for real usage; Volume
+storage for ticks is extra).
+
+### One-time setup
+1. **MongoDB Atlas** — section 12.
+2. **Modal** — sign up at modal.com, then on your Mac: `uv tool install modal` and `modal setup`.
+3. **Google OAuth client** — Google Cloud Console → *APIs & Services*:
+   - *OAuth consent screen*: External, keep it in *Testing*, add your Gmail as a test user.
+   - *Credentials → Create credentials → OAuth client ID → Web application*.
+     Authorized redirect URI: `https://<your-modal-url>/auth/callback` (add it after step 5 gives you the URL;
+     for local testing also `http://127.0.0.1:8765/auth/callback`).
+4. **Generate two keys** (keep them only in the Modal secret):
+   ```
+   uv run python -c "import secrets;print(secrets.token_urlsafe(48))"                       # TBRAIN_SESSION_SECRET
+   uv run python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"  # TBRAIN_ENCRYPTION_KEY
+   ```
+5. **First deploy** (from the project folder): `modal deploy deploy/modal_app.py` — it prints the web URL, e.g.
+   `https://<workspace>--trade-brain-web.modal.run`.
+6. **Modal secret** — Modal dashboard → *Secrets* → *Create* → *Custom*, name **`tbrain-secrets`**:
+   `UPSTOX_API_KEY`, `UPSTOX_API_SECRET`, `UPSTOX_REDIRECT_URI=https://<url>/upstox/callback`,
+   `MONGODB_URI`, `MONGODB_DB=tbrain`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+   `TBRAIN_ALLOWED_EMAILS=you@gmail.com`, `TBRAIN_SESSION_SECRET`, `TBRAIN_ENCRYPTION_KEY`,
+   `TBRAIN_PUBLIC_URL=https://<url>`, and any `TBRAIN_*` engine settings you changed in `.env`.
+7. **Upstox developer app** → set its Redirect URL to `https://<url>/upstox/callback`.
+   (Local `tbrain login --manual` keeps working: it uses copy-paste, not the redirect.)
+8. **Google client** → add `https://<url>/auth/callback` (step 3). Then `modal deploy deploy/modal_app.py` again.
+
+### Daily use
+Open the URL → *Sign in with Google* → *Connect Upstox* (bottom-right) → log in to Upstox → back on the dashboard.
+
+### Operating it
+| Task | How |
+|---|---|
+| Logs | Modal dashboard → Apps → `trade-brain` → `record_day` / `web` |
+| Start the brain manually | `modal run deploy/modal_app.py::record_day` (exits if Upstox isn't connected today) |
+| Update after code changes | `modal deploy deploy/modal_app.py` (after `uv lock`, re-export `deploy/requirements.txt`) |
+| Download recorded files | `modal volume ls tbrain-data` / `modal volume get tbrain-data ticks/date=YYYY-MM-DD ./data/ticks/` |
+| Add a user | add the email to `TBRAIN_ALLOWED_EMAILS` in the secret, redeploy. Only the owner can connect Upstox |
+
+Notes: Modal may occasionally restart a container; the brain rebuilds today's chart from the Volume and keeps its
+open calls (about a minute lost). Modal's free plan keeps logs for 1 day — MongoDB keeps the history.
+Opening the app to the public (each user with their own Upstox) is a separate step: check SEBI rules on research
+recommendations and Upstox's API terms first.
 
 ---
 
