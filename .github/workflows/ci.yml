@@ -15,6 +15,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - name: Install (locked)
-        run: uv sync --locked --python ${{ matrix.python }}
+        run: uv sync --locked --all-extras --python ${{ matrix.python }}
       - name: Tests (offline - no broker credentials needed)
         run: uv run pytest -q

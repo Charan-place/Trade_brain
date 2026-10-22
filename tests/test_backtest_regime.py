@@ -62,8 +62,9 @@ def test_replay_runs_brain_on_recorded_time(tmp_path, rows):
     (tmp_path / "instruments").mkdir()
     import json
     (tmp_path / "instruments" / f"contracts_{day}.json").write_text(json.dumps([c.to_json() for c in cs]))
-    res = replay_day(tmp_path, day.isoformat(), preset("v2"), step_s=5.0, log=lambda *a: None)
+    files = sorted((tmp_path / "ticks").rglob("*.parquet"))  # store partitions by wall-clock date; pass files explicitly
+    res = replay_day(tmp_path, day.isoformat(), preset("v2.1"), tick_files=files, step_s=5.0, log=lambda *a: None)
     assert res["rows"] == len(batch) and res["snapshots"] >= 40 * 12 - 2
     assert res["summary"]["calls"] >= 0  # engine ran end to end on simulated time
-    again = replay_day(tmp_path, day.isoformat(), preset("v2"), step_s=5.0, log=lambda *a: None)
+    again = replay_day(tmp_path, day.isoformat(), preset("v2.1"), tick_files=files, step_s=5.0, log=lambda *a: None)
     assert [c["issued_ms"] for c in again["calls"]] == [c["issued_ms"] for c in res["calls"]]  # deterministic

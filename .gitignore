@@ -37,3 +37,8 @@ htmlcov/
 Thumbs.db
 .astra/
 .claude/settings.local.json
+
+# data archives (never commit market data)
+*.tgz
+*.tar.gz
+*.zip
