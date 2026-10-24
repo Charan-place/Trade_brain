@@ -61,7 +61,9 @@ def _client(allowed=(OWNER,), userinfo=None):
     if userinfo:
         oauth.google.userinfo = userinfo
     tokens = TokenStore(db, s.encryption_key)
-    app = create_app(s, state_source=MemState(), db=db, tokens=tokens, oauth=oauth, on_upstox_connected=STARTED.append)
+    from tbrain.runtime_settings import DictSettings
+    app = create_app(s, state_source=MemState(), db=db, tokens=tokens, oauth=oauth, on_upstox_connected=STARTED.append,
+                     settings_store=DictSettings({}))
     return TestClient(app), s, db, tokens, oauth
 
 
@@ -254,3 +256,18 @@ def test_hosted_day_guards(monkeypatch):
     d = {}
     assert run_hosted_day(s, d, log, FakeRecorder, ts, now=mon) == "done" and ran == ["TOK"] and "state" in d
     assert run_hosted_day(s, d, log, FakeRecorder, ts, now=mon) == "already-running"   # state is fresh
+
+
+def test_rule_switches_owner_only_json_only():
+    c, *_ = _client()
+    assert c.get("/api/settings").status_code == 401
+    c.get("/login")
+    assert c.get("/api/settings").json() == {"settings": {}, "can_edit": True}
+    assert c.post("/api/settings", data="allow_afternoon=true",
+                  headers={"Content-Type": "application/x-www-form-urlencoded"}).status_code == 415
+    r = c.post("/api/settings", json={"allow_afternoon": True, "min_score": 1})
+    assert r.status_code == 200 and r.json()["settings"] == {"allow_afternoon": True}
+    v, *_ = _client(allowed=("*",), userinfo={"email": "viewer@gmail.com", "email_verified": True})
+    v.get("/login")
+    assert v.get("/api/settings").json()["can_edit"] is False
+    assert v.post("/api/settings", json={"allow_afternoon": True}).status_code == 403

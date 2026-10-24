@@ -89,6 +89,12 @@ class Settings:
     regime_gate: bool = False
     premium_stop: bool = False
     fut_oi_fresh: bool = False
+    # v2.2 session rules (defaults; the dashboard switches override allow_afternoon / dd_stop at runtime)
+    afternoon_cutoff: str = "13:00"     # "off" = no cutoff
+    allow_afternoon: bool = False
+    dd_stop: bool = True
+    dd_peak_r: float = 2.0
+    dd_giveback_r: float = 2.0
     # Storage (optional): MongoDB keeps calls, shadows, minute features and sessions for training. Empty = off.
     mongodb_uri: str = field(default="", repr=False)
     mongodb_db: str = "tbrain"
@@ -100,6 +106,15 @@ class Settings:
     owner_email: str = ""
     session_secret: str = field(default="", repr=False)
     encryption_key: str = field(default="", repr=False)
+
+    def cutoff_time(self):
+        """afternoon_cutoff as a datetime.time, or None when switched off."""
+        from datetime import time as dtime
+        v = (self.afternoon_cutoff or "").strip().lower()
+        if v in ("", "off", "none"):
+            return None
+        h, m = v.split(":")
+        return dtime(int(h), int(m))
 
     @classmethod
     def load(cls) -> "Settings":
@@ -127,6 +142,11 @@ class Settings:
             regime_gate=e.get("TBRAIN_REGIME_GATE", "0") in ("1", "true", "True", "on"),
             premium_stop=e.get("TBRAIN_PREMIUM_STOP", "0") in ("1", "true", "True", "on"),
             fut_oi_fresh=e.get("TBRAIN_FUT_OI_FRESH", "0") in ("1", "true", "True", "on"),
+            afternoon_cutoff=e.get("TBRAIN_AFTERNOON_CUTOFF", "13:00").strip() or "13:00",
+            allow_afternoon=e.get("TBRAIN_ALLOW_AFTERNOON", "0") in ("1", "true", "True", "on"),
+            dd_stop=e.get("TBRAIN_DD_STOP", "1") not in ("0", "false", "False", "off"),
+            dd_peak_r=float(e.get("TBRAIN_DD_PEAK_R", 2.0)),
+            dd_giveback_r=float(e.get("TBRAIN_DD_GIVEBACK_R", 2.0)),
             data_dir=Path(e["TBRAIN_DATA_DIR"]) if e.get("TBRAIN_DATA_DIR") else cls.data_dir,
             secrets_dir=Path(e["TBRAIN_SECRETS_DIR"]) if e.get("TBRAIN_SECRETS_DIR") else cls.secrets_dir,
             mongodb_uri=e.get("MONGODB_URI", ""),

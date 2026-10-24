@@ -2,7 +2,8 @@
 
 Per index, every brain tick:
   * BREAKOUT playbook (can issue live calls): 7 clues (1 pt each) + trigger (1-min close breaks the 10-min high/low)
-    + MUST filters (VWAP side, 60-min trend) + gates (window, cooldown, open call, regime*, loss pause*).
+    + MUST filters (VWAP side, 60-min trend) + gates (window, cooldown, open call, regime*, loss pause*,
+    afternoon cutoff (13:00, dashboard switch), drawdown stop (today's closed R gives back 2R from a +2R peak)).
   * RANGE-FADE playbook (shadow-only until evidence): in a range regime, a rejection candle at the 60-min extreme,
     target = VWAP.
   * SHADOW CALLS: any candidate that is blocked (by a filter, gate or build check) is tracked silently to its outcome,
@@ -60,6 +61,12 @@ class EngineConfig:
     trend_er: float = 0.25            # efficiency ratio over 60 min at/above which the market is trending
     range_er: float = 0.15            # ... below which it is ranging
     range_crosses: int = 4            # VWAP crossings in 60 min that also mark a range
+    # ---- v2.2 session rules (4 live days 19-23 Oct: calls after 13:00 = 20 calls, 4 wins, -11.8R) ----
+    afternoon_cutoff: dtime | None = dtime(13, 0)   # no NEW calls after this unless allow_afternoon (UI switch)
+    allow_afternoon: bool = False
+    dd_stop: bool = True              # stop new calls once today's realized R falls dd_giveback_r from a peak >= dd_peak_r
+    dd_peak_r: float = 2.0
+    dd_giveback_r: float = 2.0
     # ---- shadows ----
     shadows: bool = True
     range_fade_shadow: bool = True
@@ -184,6 +191,12 @@ class SignalEngine:
             if (len(done) == cfg.loss_pause_n and all(c["outcome"] == "SL" for c in done)
                     and now_ms - done[-1]["exit_ms"] < cfg.loss_pause_min * 60_000):
                 gates.append(f"paused {cfg.loss_pause_min} min after {cfg.loss_pause_n} stop-losses in a row")
+        if cfg.afternoon_cutoff is not None and not cfg.allow_afternoon and now.time() >= cfg.afternoon_cutoff:
+            gates.append(f"afternoon calls are off after {cfg.afternoon_cutoff:%H:%M} (switch on the dashboard)")
+        if cfg.dd_stop:
+            peak, cum = self.realized_path(now_ms)
+            if peak >= cfg.dd_peak_r and peak - cum >= cfg.dd_giveback_r:
+                gates.append(f"drawdown stop: today's closed calls fell {peak - cum:.1f}R from their +{peak:.1f}R peak")
 
         spot, fut, vwap = ctx.get("spot"), ctx.get("fut"), ctx.get("vwap")
         flow = ctx.get("flow") or {}
@@ -480,6 +493,31 @@ class SignalEngine:
                 "avg_r": sum(c["r_now"] for c in closed) / n, "total_pnl_per_lot": sum(c["pnl_per_lot"] for c in closed),
                 "by_outcome": {o: sum(1 for c in closed if c["outcome"] == o) for o in ("T2", "BREAKEVEN", "SL", "TIME")}}
 
+    def realized_path(self, now_ms: float) -> tuple[float, float]:
+        """(peak, current) cumulative R of today's REAL calls that had closed by now_ms, in exit order."""
+        day = datetime.fromtimestamp(now_ms / 1000, IST).date()
+        done = sorted((c for c in self.calls.values() if c["status"] == "closed" and c.get("exit_ms")
+                       and c["exit_ms"] <= now_ms and datetime.fromtimestamp(c["issued_ms"] / 1000, IST).date() == day),
+                      key=lambda c: c["exit_ms"])
+        cum = peak = 0.0
+        for c in done:
+            cum += c.get("r_now") or 0.0
+            peak = max(peak, cum)
+        return peak, cum
+
+    RUNTIME_KEYS = ("allow_afternoon", "dd_stop")
+
+    def apply_settings(self, settings: dict | None) -> dict:
+        """Runtime switches from the dashboard (only whitelisted booleans). Returns what changed."""
+        changed = {}
+        for k in self.RUNTIME_KEYS:
+            if settings and k in settings and isinstance(settings[k], bool) and getattr(self.cfg, k) != settings[k]:
+                setattr(self.cfg, k, settings[k])
+                changed[k] = settings[k]
+        if changed:
+            self.log(f"[signal] settings changed from the dashboard: {changed}")
+        return changed
+
     def today_calls(self, now_ms: float | None = None, book: dict | None = None) -> list[dict]:
         day = datetime.fromtimestamp((now_ms or time.time() * 1000) / 1000, IST).date()
         src = self.calls if book is None else book
@@ -508,7 +546,8 @@ class SignalEngine:
         for k, label in (("trend", "trend filter"), ("vwap", "VWAP filter"), ("cooldown", "cooldown"),
                          ("already open", "one open per index"), ("wall", "OI wall"), ("r:r", "R:R"), ("spread", "spread"),
                          ("thin offer", "depth"), ("regime", "regime gate"), ("paused", "loss pause"),
-                         ("shadow-only", "range-fade (shadow)"), ("premium levels", "levels"), ("stop too wide", "stop too wide")):
+                         ("shadow-only", "range-fade (shadow)"), ("premium levels", "levels"), ("stop too wide", "stop too wide"),
+                         ("afternoon", "afternoon cutoff"), ("drawdown stop", "drawdown stop")):
             if k in t:
                 return label
         return "other"
@@ -540,4 +579,7 @@ class SignalEngine:
                           "require_vwap": self.cfg.require_vwap, "trend_k": self.cfg.trend_k,
                           "regime_gate": self.cfg.regime_gate, "loss_pause_n": self.cfg.loss_pause_n,
                           "premium_stop": self.cfg.premium_stop, "min_rr_net": self.cfg.min_rr_net,
-                          "time_stop_min": self.cfg.time_stop_min, "cost_per_lot_inr": self.cfg.cost_per_lot_inr}}
+                          "time_stop_min": self.cfg.time_stop_min, "cost_per_lot_inr": self.cfg.cost_per_lot_inr,
+                          "afternoon_cutoff": self.cfg.afternoon_cutoff.strftime("%H:%M") if self.cfg.afternoon_cutoff else None,
+                          "allow_afternoon": self.cfg.allow_afternoon, "dd_stop": self.cfg.dd_stop,
+                          "dd_peak_r": self.cfg.dd_peak_r, "dd_giveback_r": self.cfg.dd_giveback_r}}

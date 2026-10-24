@@ -62,4 +62,6 @@ def web():
         if email == s.owner_email:
             record_day.spawn()
 
-    return create_app(s, state_source=DictStateSource(state), on_upstox_connected=start_today)
+    from tbrain.runtime_settings import DictSettings
+    return create_app(s, state_source=DictStateSource(state), on_upstox_connected=start_today,
+                      settings_store=DictSettings(state))
