@@ -184,7 +184,7 @@ The brain only suggests. If **you** choose to act on a call:
 | `uv run tbrain review [--date YYYY-MM-DD \| --all]` | Post-mortem of calls: by direction, hour, score, regime, outcome; stop/exit quality; **filter scorecard** from shadow calls |
 | `uv run tbrain mongo ping` / `uv run tbrain mongo import [--date D \| --all]` | Check MongoDB; copy saved calls, shadows, sessions + daily summaries into it (safe to re-run) |
 | `uv run tbrain web` | The hosted web app locally (Google sign-in + dashboard) on http://127.0.0.1:8765 |
-| `uv run tbrain backtest --date YYYY-MM-DD [--compare]` | Replay a recorded day through the real brain + engine (presets v1 / v2 / v2.1 / v2.1+regime; default v2.1); fidelity check vs the live session |
+| `uv run tbrain backtest --date YYYY-MM-DD [--compare]` | Replay a recorded day through the real brain + engine (presets v1 / v2 / v2.1 / v2.1+regime / v2.2 / v2.2+afternoon; default v2.2); fidelity check vs the live session |
 
 ---
 
@@ -201,6 +201,9 @@ The brain only suggests. If **you** choose to act on a call:
 | `TBRAIN_TREND_K` | `1.5` | v2: last-60-min index move must be ≥ k × ATR in the call's direction (`off` disables) |
 | `TBRAIN_LOSS_PAUSE_N` | `0` | Pause an index after N consecutive SLs (off by default) |
 | `TBRAIN_REGIME_GATE` | `0` | Breakout calls only in a `trend` regime |
+| `TBRAIN_AFTERNOON_CUTOFF` | `13:00` | v2.2: no new calls after this time (`off` = none). Dashboard switch *Afternoon calls* overrides it live |
+| `TBRAIN_ALLOW_AFTERNOON` | `0` | Start with afternoon calls allowed |
+| `TBRAIN_DD_STOP`, `TBRAIN_DD_PEAK_R`, `TBRAIN_DD_GIVEBACK_R` | `1`, `2`, `2` | v2.2 drawdown stop (dashboard switch *Drawdown stop*) |
 | `TBRAIN_PREMIUM_STOP` | `0` | Also stop when the option bid+LTP hit the SL premium |
 | `TBRAIN_FUT_OI_FRESH` | `0` | Futures-OI clue needs OI rising with price |
 | `TBRAIN_N_STRIKES` / `TBRAIN_N_EXPIRIES` | `10` / `2` | Chain width recorded |

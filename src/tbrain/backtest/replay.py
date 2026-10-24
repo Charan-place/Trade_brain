@@ -23,11 +23,15 @@ from tbrain.timeutil import IST, MARKET_CLOSE, MARKET_OPEN
 
 SKIP_COLS = {"rho", "gamma", "theta", "vega", "rp", "i1_ts_ms", "i1_open", "i1_high", "i1_low", "i1_close", "i1_vol"}
 
+_NO_SESSION_RULES = dict(allow_afternoon=True, dd_stop=False)   # behaviour before v2.2
 PRESETS: dict[str, dict] = {
-    "v1": dict(require_vwap=False, trend_k=None, fut_oi_fresh=False, premium_stop=False, regime_gate=False),
-    "v2": dict(fut_oi_fresh=True, premium_stop=True),   # first v2 (all new filters)
-    "v2.1": dict(),                                     # current defaults: v1 + trend + VWAP
-    "v2.1+regime": dict(regime_gate=True),
+    "v1": dict(require_vwap=False, trend_k=None, fut_oi_fresh=False, premium_stop=False, regime_gate=False,
+               **_NO_SESSION_RULES),
+    "v2": dict(fut_oi_fresh=True, premium_stop=True, **_NO_SESSION_RULES),   # first v2 (all new filters)
+    "v2.1": dict(**_NO_SESSION_RULES),                  # v1 + trend + VWAP (live 19-23 Oct)
+    "v2.1+regime": dict(regime_gate=True, **_NO_SESSION_RULES),
+    "v2.2": dict(),                                     # current defaults: v2.1 + 13:00 cutoff + drawdown stop
+    "v2.2+afternoon": dict(allow_afternoon=True),       # v2.2 with the afternoon switch ON
 }
 
 
@@ -118,7 +122,8 @@ def replay_day(data_dir: Path, day: str, cfg: EngineConfig, *, tick_files: list[
     calls = sorted(engine.calls.values(), key=lambda c: c["issued_ms"])
     shadows = sorted(engine.shadows.values(), key=lambda c: c["issued_ms"])
     res = {"day": day, "config": {k: getattr(cfg, k) for k in ("require_vwap", "trend_k", "fut_oi_fresh", "premium_stop",
-                                                                 "regime_gate", "min_score", "loss_pause_n")},
+                                                                 "regime_gate", "min_score", "loss_pause_n",
+                                                                 "allow_afternoon", "dd_stop")},
            "rows": n_rows, "snapshots": n_snaps, "seconds": round(time.time() - t_start, 1),
            "summary": SignalEngine.summarize(calls), "calls": calls, "shadows": shadows,
            "shadow_summary": _shadow_table(engine, shadows)}

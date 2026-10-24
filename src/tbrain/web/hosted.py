@@ -35,7 +35,8 @@ def run_hosted_day(s, state_dict, log=print, recorder_cls=None, tokens=None, now
     from tbrain.web.state import make_dict_publisher
     if recorder_cls is None:
         from tbrain.collector.recorder import Recorder as recorder_cls
+    from tbrain.runtime_settings import DictSettings
     r = recorder_cls(s, lambda: tokens.load(s.owner_email) or "", write=True, ui_port=None,
-                     publish=make_dict_publisher(state_dict, log=log), log=log)
+                     publish=make_dict_publisher(state_dict, log=log), log=log, settings_store=DictSettings(state_dict))
     r.run()
     return "done"

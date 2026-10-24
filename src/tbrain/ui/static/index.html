@@ -170,6 +170,8 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     <span class="spacer"></span>
     <div class="tabs" role="tablist" id="tabs"></div>
     <select id="expiry" aria-label="Expiry"></select>
+    <button class="alertbtn" id="sw-afternoon" aria-pressed="false" data-key="allow_afternoon" title="After 13:00 the brain stops issuing NEW calls (live 19-23 Oct: 20 afternoon calls, 4 wins, -11.8R). Turn on to keep getting calls until 14:45. Blocked calls are still tracked as shadows.">🌇 Afternoon calls: off</button>
+    <button class="alertbtn" id="sw-dd" aria-pressed="true" data-key="dd_stop" title="Drawdown stop: once today's closed calls have been +2R or more and then give back 2R, no new calls for the rest of the day. Blocked calls are still tracked as shadows.">🛑 Drawdown stop: on</button>
     <button class="alertbtn" id="alerts" aria-pressed="false" title="Sound + desktop notification on new calls, T1, SL">🔕 Alerts off</button>
     <button class="themebtn" id="theme" title="Toggle theme">◐ theme</button>
   </header>
@@ -636,6 +638,42 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
       : `<div><span class="sub">No block-size prints detected (≥ 20 lots and top 1% of this contract's updates).</span></div>`;
   }
 
+  // ---------- rule switches (saved on the server; the brain applies them within ~15 s) ----------
+  let ruleSettings = {}, ruleCanEdit = false;
+  const SW = {allow_afternoon: ["sw-afternoon", "🌇 Afternoon calls", false], dd_stop: ["sw-dd", "🛑 Drawdown stop", true]};
+  function paintSwitches(live) {
+    for (const [key, [id, label, dflt]] of Object.entries(SW)) {
+      const b = $(id); if (!b) continue;
+      const want = key in ruleSettings ? ruleSettings[key] : dflt;
+      const now = live && key in live ? live[key] : want;
+      b.setAttribute("aria-pressed", String(!!want));
+      b.textContent = `${label}: ${want ? "on" : "off"}${now !== want ? " (applying…)" : ""}`;
+      b.disabled = !ruleCanEdit;
+      if (!ruleCanEdit) b.title = b.title.split(" [")[0] + " [view only]";
+    }
+  }
+  async function loadSwitches() {
+    try { const r = await fetch("/api/settings", {cache: "no-store"}); if (!r.ok) return;
+          const j = await r.json(); ruleSettings = j.settings || {}; ruleCanEdit = !!j.can_edit; paintSwitches(); } catch {}
+  }
+  for (const [key, [id, , dflt]] of Object.entries(SW)) {
+    const b = $(id); if (!b) continue;
+    b.onclick = async () => {
+      if (!ruleCanEdit) return;
+      const cur = key in ruleSettings ? ruleSettings[key] : dflt;
+      const msg = key === "allow_afternoon" && !cur
+        ? "Turn ON calls after 13:00? Afternoon calls have lost money so far (20 calls, 4 wins, -11.8R over 19-23 Oct)."
+        : null;
+      if (msg && !window.confirm(msg)) return;
+      try {
+        const r = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
+                                                body: JSON.stringify({[key]: !cur})});
+        if (r.ok) { const j = await r.json(); ruleSettings = j.settings || ruleSettings; paintSwitches(); }
+      } catch {}
+    };
+  }
+  loadSwitches();
+
   // ---------- alerts: Web Audio chime + desktop notification ----------
   let audio = null, alertsOn = store.get("tb.alerts") === "1";
   const seen = new Map();  // call id -> last status seen
@@ -798,6 +836,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
   let pending = false;
   function onState(obj) {
     state = obj; lastMsgAt = Date.now();
+    try { paintSwitches((obj.signals || {}).rules); } catch {}
     if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; render(); renderAge(); }); }
   }
   let es = null, pollTimer = null;

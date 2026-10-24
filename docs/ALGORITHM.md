@@ -87,6 +87,29 @@ Replay of the 17 day-1 calls: trend + VWAP keep 12 calls, 7 wins, +8.86R (vs +3.
 - Unchanged for now: cooldown and one-open-per-index (their shadows would have made +10R / +8R, but one trend day isn't enough to loosen them).
 - The filter-only estimate (+8.86R) was optimistic: blocking a call changes which later calls fire. One day only — rerun `tbrain backtest` on every new session.
 
+## v2.2 session rules (2026-10-24, from 4 live days: 19, 21, 22, 23 Oct — 55 calls)
+| Time of entry | Calls | Wins | Sum R |
+|---|---|---|---|
+| before 12:00 | 27 | 16 | +24.70 |
+| 12:00-13:00 | 8 | 3 | +0.87 |
+| 13:00-14:45 | 20 | 4 | **−11.83** (negative on every day that traded after 13:00) |
+
+Rules tested on the same 55 calls (exact: they only remove later calls; decisions use only already-closed calls):
+| Rule | Total R | ₹/lot | Notes |
+|---|---|---|---|
+| v2.1 (live) | +13.74 | +11,772 | |
+| **no new calls after 13:00** | **+25.57** | **+22,986** | better on 19/21/23 Oct, never worse |
+| drawdown stop 2R peak / 2R give-back | +21.48 | +19,900 | better 19 & 23 Oct; 3R/3R was worse on 19 Oct (sensitive) |
+| skip 2nd index same direction | +8.00 | +5,092 | **rejected** — the 2nd index usually confirms trend moves |
+- **Afternoon cutoff 13:00** — default on. Dashboard switch *Afternoon calls* turns calls back on until 14:45.
+- **Drawdown stop** — today's closed real calls (exit order) reach a ≥ +2R peak then give back ≥ 2R → no new calls today.
+  Dashboard switch *Drawdown stop*.
+- Both are **gates that create shadows**, so the scorecard keeps measuring them ("afternoon cutoff", "drawdown stop").
+  Review after ~10 more trading days: if blocked afternoon shadows are net positive, switch the cutoff off.
+- These are discipline rules, not better predictions. In-sample (same 4 days the pattern came from): expect less than +11.8R.
+- Switches live in `data/live/settings.json` (local) or the Modal Dict (hosted); the brain re-reads them every 15 s.
+  Only the owner account can change them; viewers see them read-only.
+
 ## Shadow calls (the learning loop)
 Every candidate that reaches the trigger with enough clues but is **blocked** (trend/VWAP filter, cooldown, open call,
 OI wall, R:R, spread, depth, regime gate, loss pause) is built exactly like a real call and tracked silently to its

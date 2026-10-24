@@ -33,7 +33,7 @@ RECENTER_CHECK_S = 10
 class Recorder:
     def __init__(self, s: Settings, token_provider: Callable[[], str], *, write: bool = True,
                  capture_raw: int = 0, n_strikes: int | None = None, n_expiries: int | None = None, log=print,
-                 ui_port: int | None = None, open_browser: bool = False, publish=None):
+                 ui_port: int | None = None, open_browser: bool = False, publish=None, settings_store=None):
         self.s, self.log = s, log
         self.token_provider = token_provider
         self.n_strikes = s.n_strikes if n_strikes is None else n_strikes
@@ -56,6 +56,12 @@ class Recorder:
         self.bc = None
         self.publish = publish        # optional extra snapshot consumer (hosted app); must be cheap and never raise
         self.sink = None              # MongoSink when MONGODB_URI is set
+        self.engine = None
+        if settings_store is None:
+            from tbrain.runtime_settings import FileSettings
+            settings_store = FileSettings(s.data_dir / "live" / "settings.json")
+        self.settings_store = settings_store  # dashboard switches (afternoon calls, drawdown stop)
+        self._last_settings = 0.0
         self._last_daily = 0.0
         self.note = ""
         self.feed = LiveFeed(token_provider, self._on_msg, self._on_state, tls_verify=s.tls_verify, stale_s=s.stale_s)
@@ -176,8 +182,13 @@ class Recorder:
                                                risk_per_trade_inr=self.s.risk_per_trade_inr, require_vwap=self.s.require_vwap,
                                                trend_k=self.s.trend_k, loss_pause_n=self.s.loss_pause_n,
                                                regime_gate=self.s.regime_gate, premium_stop=self.s.premium_stop,
-                                               fut_oi_fresh=self.s.fut_oi_fresh),
+                                               fut_oi_fresh=self.s.fut_oi_fresh,
+                                               afternoon_cutoff=self.s.cutoff_time(), allow_afternoon=self.s.allow_afternoon,
+                                               dd_stop=self.s.dd_stop, dd_peak_r=self.s.dd_peak_r,
+                                               dd_giveback_r=self.s.dd_giveback_r),
                                   store_dir=self.s.data_dir / "signals", log=self.log)
+            self.engine = engine
+            self._apply_settings(force=True)
             from tbrain.storage.mongo import open_sink
             self.sink = open_sink(self.s, log=self.log)
             if self.sink:
@@ -304,7 +315,7 @@ class Recorder:
             from tbrain.ui.server import Broadcaster, UIServer
             self.bc = Broadcaster()
             try:
-                self.ui = UIServer(self.bc, self.ui_port).start()
+                self.ui = UIServer(self.bc, self.ui_port, self.settings_store).start()
             except OSError as e:
                 self.log(f"[ui] port {self.ui_port} busy ({e}); recording continues without the UI")
                 self.bc = None
@@ -316,6 +327,16 @@ class Recorder:
         # The brain loop also runs the signal engine, so it must run whenever we record - with or without a UI.
         if self.bc is not None or self.write or self.publish is not None:
             threading.Thread(target=self._brain_loop, daemon=True, name="brain-tick").start()
+
+    def _apply_settings(self, force: bool = False) -> None:
+        """Pick up dashboard switches (every 15 s). Never raises."""
+        if self.engine is None or (not force and time.monotonic() - self._last_settings < 15):
+            return
+        self._last_settings = time.monotonic()
+        try:
+            self.engine.apply_settings(self.settings_store.get())
+        except Exception as e:  # noqa: BLE001
+            self.log(f"[settings] {e!r}")
 
     def _save_daily(self, force: bool = False, snap: dict | None = None) -> None:
         if not self.sink or self.brain is None or (not force and time.monotonic() - self._last_daily < 60):
@@ -335,6 +356,7 @@ class Recorder:
         nxt = time.monotonic()
         while not self._stop.is_set():
             try:
+                self._apply_settings()
                 info = self.feed_info()
                 if self.note:
                     info["note"] = self.note

@@ -205,10 +205,14 @@ a.back{{color:var(--ink2);text-decoration:none;font-size:13px;display:inline-blo
 </div></body></html>"""
 
 
-def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_upstox_connected=None) -> FastAPI:
+def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_upstox_connected=None,
+               settings_store=None) -> FastAPI:
     """Build the app. Dependencies are injectable so tests can run without Google, Mongo or Modal."""
     if not s.session_secret:
         raise RuntimeError("TBRAIN_SESSION_SECRET is not set")
+    if settings_store is None:
+        from tbrain.runtime_settings import FileSettings
+        settings_store = FileSettings(s.data_dir / "live" / "settings.json")
     if state_source is None:
         from tbrain.web.state import FileStateSource
         state_source = FileStateSource(s)
@@ -438,6 +442,29 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
         if email:
             db.access.update_one({"_id": email}, {"$set": {"status": "denied"}}, upsert=True)
         return RedirectResponse("/admin/access", status_code=303)
+
+    @app.get("/api/settings")
+    async def get_settings(request: Request):
+        u = user(request)
+        if not u:
+            return JSONResponse({"error": "sign in"}, status_code=401)
+        return {"settings": await asyncio.to_thread(settings_store.get), "can_edit": is_owner(u)}
+
+    @app.post("/api/settings")
+    async def post_settings(request: Request):
+        u = user(request)
+        if not u:
+            return JSONResponse({"error": "sign in"}, status_code=401)
+        if not is_owner(u):
+            return JSONResponse({"error": "only the owner can change the brain's rules"}, status_code=403)
+        if "application/json" not in (request.headers.get("content-type") or ""):
+            return JSONResponse({"error": "json only"}, status_code=415)   # CSRF guard (forms can't send JSON)
+        try:
+            changes = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "bad json"}, status_code=400)
+        cur = await asyncio.to_thread(settings_store.update, changes if isinstance(changes, dict) else {})
+        return {"settings": cur, "can_edit": True}
 
     @app.get("/api/state")
     async def api_state(request: Request):
