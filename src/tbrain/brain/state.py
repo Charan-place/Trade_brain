@@ -299,6 +299,19 @@ class BrainState:
             out["vix"] = {"ltp": v.get("ltp"), "cp": v.get("cp")}
         return out
 
+    def _regime_layer(self, signals: dict) -> dict:
+        """Regime is computed every tick (trend / range / mixed) and saved on every call; it only BLOCKS calls when
+        the regime gate is on (off until the labels are recalibrated)."""
+        labels = {u: (d.get("regime") or {}).get("label") for u, d in (signals.get("diagnostics") or {}).items()}
+        labels = {u: l for u, l in labels.items() if l}
+        gate = bool(self.engine and getattr(self.engine.cfg, "regime_gate", False))
+        now = " · ".join(f"{u} {l}" for u, l in sorted(labels.items())) or "no reading yet"
+        if gate:
+            return {"id": "regime", "name": "Regime", "status": "on",
+                    "detail": f"Blocking breakout calls outside a trend. Now: {now}"}
+        return {"id": "regime", "name": "Regime", "status": "labelling" if labels else "off",
+                "detail": f"Labelling only (trend / range / mixed on each call), not blocking yet. Now: {now}"}
+
     def _layers(self, feed: dict, unds: dict, signals: dict) -> list[dict]:
         have_chain = any(u.get("chains") for u in unds.values())
         connected = feed.get("connected", False)
@@ -310,7 +323,7 @@ class BrainState:
              "detail": "Live IV, Greeks, moneyness, OI, flow, big prints, candles" if have_chain else "Waiting for data"},
             {"id": "memory", "name": "Memory", "status": "learning" if self.sessions_recorded else "off",
              "detail": f"{self.sessions_recorded} session(s) recorded; candles + 30-min feature history in RAM"},
-            {"id": "regime", "name": "Regime", "status": "off", "detail": "Not trained (needs recorded sessions)"},
+            self._regime_layer(signals),
             {"id": "cortex", "name": "Cortex", "status": "off", "detail": "ML vol/direction models not trained yet"},
             {"id": "judgement", "name": "Judgement", "status": "learning" if judging else "off",
              "detail": "EXPERIMENTAL rule engine: 7-signal confluence + trigger + gates" if judging else "Runs while recording live"},

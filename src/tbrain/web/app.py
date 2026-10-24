@@ -443,6 +443,21 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
             db.access.update_one({"_id": email}, {"$set": {"status": "denied"}}, upsert=True)
         return RedirectResponse("/admin/access", status_code=303)
 
+    @app.get("/api/history")
+    async def api_history(request: Request, days: int = 60):
+        if not user(request):
+            return JSONResponse({"error": "sign in"}, status_code=401)
+        from tbrain import history as H
+        days = max(1, min(int(days), 365))
+        try:
+            if db is not None:
+                h = await asyncio.to_thread(H.from_mongo, db, s.owner_email or None, days)
+            else:
+                h = await asyncio.to_thread(H.from_files, s.data_dir, days)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"history unavailable: {type(e).__name__}"}, status_code=503)
+        return JSONResponse(h, headers={"Cache-Control": "no-store"})
+
     @app.get("/api/settings")
     async def get_settings(request: Request):
         u = user(request)

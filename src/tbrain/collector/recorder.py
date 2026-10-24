@@ -315,7 +315,9 @@ class Recorder:
             from tbrain.ui.server import Broadcaster, UIServer
             self.bc = Broadcaster()
             try:
-                self.ui = UIServer(self.bc, self.ui_port, self.settings_store).start()
+                from tbrain.history import from_files
+                self.ui = UIServer(self.bc, self.ui_port, self.settings_store,
+                                   history=lambda: from_files(self.s.data_dir)).start()
             except OSError as e:
                 self.log(f"[ui] port {self.ui_port} busy ({e}); recording continues without the UI")
                 self.bc = None

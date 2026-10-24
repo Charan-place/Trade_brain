@@ -4,11 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Trade Brain</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%236d5ce8' fill-opacity='.18' stroke='%236d5ce8' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%236d5ce8'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
   color-scheme: light;
-  --page:#f9f9f7; --surface:#fcfcfb; --surface-2:#f2f1ed; --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
-  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10);
+  --page:#eef1f6; --surface:#ffffff; --surface-2:#f3f5f9; --ink:#142033; --ink-2:#465266; --muted:#7a8597;
+  --grid:#e1e6ee; --axis:#c5ccd8; --ring:rgba(20,32,51,.10); --brain:#6d5ce8; --brain-wash:rgba(109,92,232,.10);
   --call:#2a78d6; --put:#eb6834; --call-wash:rgba(42,120,214,.10); --put-wash:rgba(235,104,52,.10);
   --buy:#2a78d6; --sell:#e34948; --mid:#f0efec;
   --good:#0ca30c; --warn:#fab219; --crit:#d03b3b; --good-ink:#006300;
@@ -17,39 +20,56 @@
 @media (prefers-color-scheme: dark){
   :root:where(:not([data-theme="light"])){
     color-scheme: dark;
-    --page:#0d0d0d; --surface:#1a1a19; --surface-2:#232321; --ink:#f0efec; --ink-2:#c3c2b7; --muted:#898781;
-    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
+    --page:#0e1520; --surface:#151f2e; --surface-2:#1b2738; --ink:#e7ecf3; --ink-2:#aab5c4; --muted:#7d899b;
+    --grid:#233144; --axis:#34455c; --ring:rgba(170,190,220,.13); --brain:#9b8cff; --brain-wash:rgba(155,140,255,.14);
     --call:#3987e5; --put:#d95926; --call-wash:rgba(57,135,229,.12); --put-wash:rgba(217,89,38,.12);
     --buy:#3987e5; --sell:#e66767; --mid:#383835; --good-ink:#0ca30c; --glow:rgba(57,135,229,.45);
   }
 }
 :root[data-theme="dark"]{
   color-scheme: dark;
-  --page:#0d0d0d; --surface:#1a1a19; --surface-2:#232321; --ink:#f0efec; --ink-2:#c3c2b7; --muted:#898781;
-  --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
+  --page:#0e1520; --surface:#151f2e; --surface-2:#1b2738; --ink:#e7ecf3; --ink-2:#aab5c4; --muted:#7d899b;
+  --grid:#233144; --axis:#34455c; --ring:rgba(170,190,220,.13); --brain:#9b8cff; --brain-wash:rgba(155,140,255,.14);
   --call:#3987e5; --put:#d95926; --call-wash:rgba(57,135,229,.12); --put-wash:rgba(217,89,38,.12);
   --buy:#3987e5; --sell:#e66767; --mid:#383835; --good-ink:#0ca30c; --glow:rgba(57,135,229,.45);
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--page);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
-.wrap{max-width:1440px;margin:0 auto;padding:16px}
-header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
-h1{font-size:18px;margin:0;letter-spacing:.02em}
-h2{font-size:13px;font-weight:600;margin:0 0 10px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em}
+body{margin:0;background:var(--page);color:var(--ink);font:14px/1.5 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1440px;margin:0 auto;padding:0 16px 24px}
+header{position:sticky;top:0;z-index:15;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 -16px 16px;padding:10px 16px;
+  background:color-mix(in srgb,var(--page) 88%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--grid)}
+@media (max-width:760px){header{position:static;backdrop-filter:none;-webkit-backdrop-filter:none}}
+.brand{display:flex;align-items:center;gap:10px;margin-right:6px}
+.brand .mark{position:relative;width:26px;height:26px;border-radius:50%;background:var(--brain-wash);box-shadow:inset 0 0 0 1.5px var(--brain)}
+.brand .mark::after{content:"";position:absolute;inset:8px;border-radius:50%;background:var(--brain)}
+.brand.live .mark::before{content:"";position:absolute;inset:-4px;border-radius:50%;box-shadow:0 0 0 1.5px var(--brain);opacity:0;animation:pulse 2.4s ease-out infinite}
+@keyframes pulse{0%{transform:scale(.7);opacity:.7}100%{transform:scale(1.25);opacity:0}}
+@media (prefers-reduced-motion:reduce){.brand.live .mark::before{animation:none}}
+h1{font:600 18px/1.1 "IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;margin:0;letter-spacing:.01em}
+.brand .tag{font-size:11.5px;color:var(--muted);margin-top:2px}
+.ctrls{display:flex;gap:6px;flex-wrap:wrap}
+h2{font:600 15px/1.3 "IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;margin:0 0 10px;color:var(--ink);letter-spacing:.005em}
+[data-info]{cursor:help} button[data-info],select[data-info],label[data-info],tr[data-info]{cursor:pointer}
+h2[data-info]::after{content:"i";display:inline-grid;place-items:center;width:15px;height:15px;margin-left:7px;border-radius:50%;
+  font:600 10px/1 "IBM Plex Sans",sans-serif;color:var(--brain);box-shadow:inset 0 0 0 1.2px var(--brain);vertical-align:2px;opacity:.75}
+:focus-visible{outline:2px solid var(--brain);outline-offset:2px}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:var(--surface);box-shadow:0 0 0 1px var(--ring);font-size:12px;color:var(--ink-2)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
 .dot.good{background:var(--good)} .dot.warn{background:var(--warn)} .dot.crit{background:var(--crit)}
 .spacer{flex:1}
 .tabs{display:flex;gap:6px}
 .tab{border:0;background:var(--surface);color:var(--ink-2);padding:6px 14px;border-radius:8px;cursor:pointer;box-shadow:0 0 0 1px var(--ring);font:inherit}
-.tab[aria-selected="true"]{color:var(--ink);box-shadow:0 0 0 2px var(--call)}
+.tab[aria-selected="true"]{color:var(--ink);box-shadow:0 0 0 2px var(--brain);background:var(--brain-wash)}
 select{font:inherit;background:var(--surface);color:var(--ink);border:0;box-shadow:0 0 0 1px var(--ring);border-radius:8px;padding:5px 8px}
 .themebtn{border:0;background:transparent;color:var(--ink-2);cursor:pointer;font:inherit}
-.card{background:var(--surface);border-radius:12px;box-shadow:0 0 0 1px var(--ring);padding:14px}
+.card{background:var(--surface);border-radius:14px;box-shadow:0 0 0 1px var(--ring),0 1px 2px rgba(10,20,40,.04);padding:16px}
 .grid{display:grid;gap:14px}
 .tiles{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}
-.tile .lbl{font-size:12px;color:var(--ink-2)}
-.tile .val{font-size:22px;font-weight:600;margin-top:2px}
+.tile{border-radius:10px;padding:12px 14px}
+.tile .lbl{font-size:12.5px;color:var(--ink-2)}
+.tile .val{font-size:24px;font-weight:600;margin-top:2px;letter-spacing:-.01em}
 .tile .sub{font-size:12px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
 .up{color:var(--good-ink)} .down{color:var(--crit)}
 .row2{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);margin-bottom:14px}
@@ -99,7 +119,9 @@ svg text{fill:var(--muted);font-size:11px}
 .meter .fill{position:absolute;top:0;height:12px;border-radius:6px}
 .meter .zero{position:absolute;left:50%;top:-3px;width:2px;height:18px;background:var(--surface)}
 .meter .ends{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:3px}
-#tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--ring),0 6px 24px rgba(0,0,0,.25);border-radius:8px;padding:8px 10px;font-size:12px;display:none;z-index:10;max-width:320px;font-variant-numeric:tabular-nums}
+#tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--ring),0 10px 30px rgba(5,12,25,.28);border-radius:10px;padding:9px 12px;font-size:12.5px;line-height:1.45;display:none;z-index:40;max-width:300px;font-variant-numeric:tabular-nums}
+#tip.info{border-left:3px solid var(--brain);padding-left:11px}
+#tip.info b{display:block;font-size:13px;margin-bottom:2px}
 #tip b{font-weight:600}
 footer{margin-top:16px;font-size:12px;color:var(--muted)}
 .tfbar{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:0 0 8px}
@@ -144,6 +166,10 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
 .calls tbody tr:hover td{background:var(--surface-2)}
 .calls tr.sel td{background:var(--call-wash)}
 .pos{color:var(--good-ink);font-weight:600} .neg{color:var(--crit);font-weight:600}
+#histTbl tr.day td{font-weight:600} #histTbl tr.day td:first-child::before{content:"▸ ";color:var(--muted)}
+#histTbl tr.day.open td:first-child::before{content:"▾ "} #histTbl tr.trade td{font-size:12px;background:var(--surface-2)}
+#histTbl tr.trade{cursor:default} #histTbl tr.trade:hover td{background:var(--surface-2)}
+#histTbl tr.trade th{position:static;background:var(--surface-2)}
 .calls .rr{display:block;font-size:10.5px;font-weight:500;opacity:.85}
 .oc{display:inline-block;min-width:54px;text-align:center;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600}
 .oc.win{background:rgba(12,163,12,.15);color:var(--good-ink)} .oc.loss{background:rgba(208,59,59,.15);color:var(--crit)}
@@ -162,7 +188,8 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
 <body>
 <div class="wrap">
   <header>
-    <h1>Trade Brain</h1>
+    <div class="brand" id="brand"><span class="mark" aria-hidden="true"></span>
+      <div><h1>Trade Brain</h1><div class="tag">NIFTY + SENSEX options · signals only, never orders</div></div></div>
     <span class="pill" id="mode"><span class="dot"></span><span>connecting…</span></span>
     <span class="pill" id="market"><span class="dot"></span><span>market —</span></span>
     <span class="pill" id="feed"><span class="dot"></span><span>feed —</span></span>
@@ -170,9 +197,11 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     <span class="spacer"></span>
     <div class="tabs" role="tablist" id="tabs"></div>
     <select id="expiry" aria-label="Expiry"></select>
+    <div class="ctrls" role="group" aria-label="Brain switches">
     <button class="alertbtn" id="sw-afternoon" aria-pressed="false" data-key="allow_afternoon" title="After 13:00 the brain stops issuing NEW calls (live 19-23 Oct: 20 afternoon calls, 4 wins, -11.8R). Turn on to keep getting calls until 14:45. Blocked calls are still tracked as shadows.">🌇 Afternoon calls: off</button>
     <button class="alertbtn" id="sw-dd" aria-pressed="true" data-key="dd_stop" title="Drawdown stop: once today's closed calls have been +2R or more and then give back 2R, no new calls for the rest of the day. Blocked calls are still tracked as shadows.">🛑 Drawdown stop: on</button>
     <button class="alertbtn" id="alerts" aria-pressed="false" title="Sound + desktop notification on new calls, T1, SL">🔕 Alerts off</button>
+    </div>
     <button class="themebtn" id="theme" title="Toggle theme">◐ theme</button>
   </header>
 
@@ -210,7 +239,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     <div class="card" id="brain">
       <h2>Brain layers</h2>
       <svg viewBox="0 0 760 170" role="img" aria-label="Brain layer status"></svg>
-      <div class="layer-detail" id="layerDetail">Hover a layer to see what it does.</div>
+      <div class="layer-detail" id="layerDetail">Hover a layer to see what it does. Flow: see → remember → read the day → learned patterns → decide → safety checks → review.</div>
     </div>
     <div class="card" id="signals">
       <h2>Brain thinking · live</h2>
@@ -258,6 +287,16 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     </div>
   </section>
 
+  <section class="grid" style="grid-template-columns:minmax(0,1fr)">
+    <div class="card" id="history">
+      <h2>Trade history · every day's calls</h2>
+      <div id="histTotal" style="font-size:13px;color:var(--ink-2);margin-top:2px">Loading…</div>
+      <div class="callwrap" style="max-height:560px"><table class="calls" id="histTbl"></table></div>
+      <div class="note">Signal-only: these are the brain's calls tracked to their outcome (P&amp;L per lot at the option bid,
+        after estimated costs), not orders placed. Click a day to see its trades.</div>
+    </div>
+  </section>
+
   <footer id="foot"></footer>
 </div>
 <div id="tip" role="tooltip"></div>
@@ -301,7 +340,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
 
   // tooltip
   const tip = $("tip");
-  const showTip = (html, e) => { tip.innerHTML = html; tip.style.display = "block"; moveTip(e); };
+  const showTip = (html, e) => { tip.classList.remove("info"); tip.innerHTML = html; tip.style.display = "block"; moveTip(e); };
   const moveTip = (e) => {
     const w = tip.offsetWidth, h = tip.offsetHeight;
     let x = e.clientX + 14, y = e.clientY + 14;
@@ -309,7 +348,82 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     if (y + h > innerHeight - 8) y = e.clientY - h - 14;
     tip.style.left = `${x}px`; tip.style.top = `${y}px`;
   };
-  const hideTip = () => { tip.style.display = "none"; };
+  const hideTip = () => { tip.style.display = "none"; tip.classList.remove("info"); };
+
+  // ---------- hover info cards: a few words on what each part of the page does ----------
+  const TILE_INFO = {
+    _spot: "Index level|Live index price and its change since yesterday's close.",
+    "Future": "Index future|Near-month future price. Basis = future minus spot.",
+    "ATM IV (ours)": "At-the-money IV|Our own implied volatility at the ATM strike (Black-76), with Upstox's figure to compare.",
+    "ATM straddle": "ATM straddle|ATM call + put price: roughly the move the market expects by this expiry.",
+    "PCR (OI)": "Put-call ratio|Put open interest ÷ call open interest on the recorded strikes. Context only, not used for calls.",
+    "Max pain": "Max pain and walls|Strike where option buyers lose most at expiry. Walls are the biggest call/put OI; calls that would run into a wall are skipped.",
+    "25Δ skew": "Skew|Put IV minus call IV at 25 delta. Positive means traders pay more for downside protection. Context only.",
+    "India VIX": "India VIX|The market's expected volatility for the next 30 days. Context only, not used for calls yet.",
+  };
+  const INFO = [
+    ["#mode", "Brain status|LIVE = streaming market data and judging calls. LAST SESSION = recorder not running; showing the last state."],
+    ["#market", "Exchange session|Whether the NSE/BSE F&O session is open, from Upstox."],
+    ["#feed", "Data feed|Messages received from Upstox and any gaps longer than 10 seconds."],
+    ["#age", "Data age|Screen: how old this snapshot is. Exchange: time since the index last ticked. Upstox→us: network delay."],
+    ["#tabs", "Index|Switch the whole page between NIFTY and SENSEX."],
+    ["#expiry", "Expiry|Which option expiry the chain, smile and ladder show."],
+    ["#sw-afternoon", "Afternoon calls|Off: no new calls after 13:00 (afternoon calls have mostly lost so far). On: calls until 14:45."],
+    ["#sw-dd", "Drawdown stop|On: once today's closed calls reach +2R and then give back 2R, no new calls today."],
+    ["#alerts", "Alerts|Sound and a desktop notification on every new call, T1 and stop-loss."],
+    ["#theme", "Theme|Switch between light and dark."],
+    ["#tfbar .tf", "Timeframe|Candle size for the chart. Calls are judged on 1-minute candles."],
+    ["label.ovl:nth-of-type(1)", "VWAP|Volume-weighted average price of the future. A call needs price on its side of VWAP."],
+    ["label.ovl:nth-of-type(2)", "EMA 9|Short moving average. Chart aid only."],
+    ["label.ovl:nth-of-type(3)", "EMA 21|Medium moving average. Chart aid only."],
+    ["#chartTitle", "Live chart|1-minute candles with VWAP and EMAs. Arrows mark calls; lines show entry, stop-loss and targets."],
+    ["#trade h2", "Trade window|The selected call: option, expiry, entry, stop, targets, live P&L at the bid, and why it was taken."],
+    ["#brain h2", "Brain layers|Which parts of the brain are active right now: data in, judgement, calls, and self-review."],
+    ["#signals h2", "Brain thinking|For each side, the 7 clues, 2 must-haves and the gates. A call needs 5 of 7 clues, both must-haves and a breakout."],
+    ["#daybar", "Today|Today's calls so far: wins, losses and P&L per lot."],
+    ["#ladder", "OI ladder|Open interest for each strike. ◆ marks the biggest wall, ▣ the ATM strike."],
+    ["#flow", "Order flow|Futures order-book lean, resting orders and aggressive buying versus selling."],
+    ["#tape", "Big prints|Large trades in the last 15 minutes (20+ lots, top 1% of updates). Buy/sell side is inferred."],
+    ["#history h2", "Trade history|Every day's calls with result and P&L per lot. Click a day to see its trades."],
+  ];
+  const H2_INFO = {"Option chain": "OI ladder|Open interest for each strike. ◆ marks the biggest wall, ▣ the ATM strike.",
+                   "Volatility smile": "Volatility smile|Implied volatility by strike from our model; circles are Upstox's figures.",
+                   "Order flow": "Order flow|Futures order-book lean, resting orders and aggressive buying versus selling.",
+                   "Big prints": "Big prints|Large trades in the last 15 minutes. Buy/sell side is inferred from price vs quote."};
+  function applyInfo() {
+    for (const [sel, txt] of INFO) document.querySelectorAll(sel).forEach((el) => {
+      if (el.dataset.tip && el.dataset.tip !== "info") return;   // charts own their tooltips
+      el.dataset.tip = "info"; el.dataset.info = txt; el.removeAttribute("title");
+    });
+    document.querySelectorAll("h2").forEach((h) => {
+      if (h.dataset.info) return;
+      const k = Object.keys(H2_INFO).find((k) => h.textContent.trim().startsWith(k));
+      if (k) { h.dataset.tip = "info"; h.dataset.info = H2_INFO[k]; }
+    });
+  }
+  function infoHtml(el) { const [t, d] = (el.dataset.info || "").split("|"); return `<b>${esc(t)}</b>${esc(d || "")}`; }
+  function showInfo(el, e) { showTip(infoHtml(el), e); tip.classList.add("info"); }
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target.closest && e.target.closest("[data-info]");
+    if (el) showInfo(el, e);
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (tip.classList.contains("info") && e.target.closest && e.target.closest("[data-info]")) moveTip(e);
+  });
+  document.addEventListener("focusin", (e) => {   // keyboard users get the same card
+    const el = e.target.closest && e.target.closest("[data-info]");
+    if (!el) return;
+    const r = el.getBoundingClientRect(); showInfo(el, {clientX: r.left, clientY: r.bottom});
+  });
+  document.addEventListener("focusout", hideTip);
+  let touchTimer = null;
+  document.addEventListener("pointerdown", (e) => {   // phones: tap shows the card for 3 s
+    if (e.pointerType !== "touch") return;
+    const el = e.target.closest && e.target.closest("[data-info]");
+    if (!el) return;
+    showInfo(el, e); clearTimeout(touchTimer); touchTimer = setTimeout(hideTip, 3000);
+  });
+  applyInfo();
   document.addEventListener("mousemove", (e) => {
     if (!(e.target.closest && e.target.closest('[data-tip]'))) { hover = null; chartHover = null; hideTip(); }
   }, true);
@@ -343,7 +457,9 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
   }
 
   function tile(label, val, sub, cls = "") {
-    return `<div class="card tile"><div class="lbl">${esc(label)}</div><div class="val ${cls}">${val}</div><div class="sub">${sub}</div></div>`;
+    const inf = TILE_INFO[label] || (label === "NIFTY" || label === "SENSEX" ? TILE_INFO._spot : null);
+    const at = inf ? ` data-tip="info" data-info="${esc(inf)}"` : "";
+    return `<div class="card tile"${at}><div class="lbl">${esc(label)}</div><div class="val ${cls}">${val}</div><div class="sub">${sub}</div></div>`;
   }
 
   function renderTiles() {
@@ -364,7 +480,17 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     $("tiles").innerHTML = t.join("");
   }
 
-  const STATUS = { on: ["good", "ON"], partial: ["warn", "PARTIAL"], learning: ["warn", "LEARNING"], off: ["", "OFF"] };
+  const STATUS = { on: ["good", "ON"], partial: ["warn", "PARTIAL"], learning: ["warn", "LEARNING"],
+                   labelling: ["warn", "LABELLING"], off: ["", "OFF"] };
+  const LAYER_PLAIN = {
+    senses: "Reads live prices, option chain, IV, OI, order book, big trades and candles. Green while connected to Upstox with the chain flowing.",
+    memory: "Keeps today's candles and the last 30 minutes of history; counts recorded sessions. Nothing is learned from it yet.",
+    regime: "Labels the market trend / range / mixed every minute and saves it on each call. It does not block calls until it is recalibrated.",
+    cortex: "Future machine-learning layer that will learn which setups really win. Needs a few weeks of saved calls first.",
+    judgement: "Decides calls: 5 of 7 clues + both must-haves (VWAP side, 60-min trend) + a breakout. Runs live during market hours.",
+    reflex: "Safety checks before any call: time window, 13:00 cutoff, drawdown stop, cooldown, one call per index, spread, depth, R:R, fresh data.",
+    mirror: "Tracks every call and blocked call (shadow) to its result and keeps the scoreboard.",
+  };
   function renderBrain() {
     const L = state.brain || []; const svg = document.querySelector("#brain svg");
     if (!L.length) { svg.innerHTML = ""; return; }
@@ -373,14 +499,14 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     let links = "";
     for (let i = 0; i < n - 1; i++) {
       const [ax, ay] = pos[i], [bx, by] = pos[i + 1];
-      const live = L[i].status === "on" && (L[i + 1].status === "on" || L[i + 1].status === "learning" || L[i + 1].status === "partial");
+      const live = L[i].status === "on" && ["on", "learning", "partial", "labelling"].includes(L[i + 1].status);
       links += `<path class="link ${live ? "live" : ""}" d="M${ax},${ay} C${(ax + bx) / 2},${ay} ${(ax + bx) / 2},${by} ${bx},${by}"/>`;
     }
     const col = { good: "var(--good)", warn: "var(--warn)", "": "var(--axis)" };
     const nodes = L.map((l, i) => {
       const [cls, word] = STATUS[l.status] || STATUS.off; const [x, y] = pos[i];
       const on = l.status !== "off";
-      return `<g class="node" data-i="${i}" tabindex="0" style="cursor:default">
+      return `<g class="node" data-i="${i}" tabindex="0" style="cursor:default" data-tip="info" data-info="${esc(l.name + "|" + (LAYER_PLAIN[l.id] || l.detail))}">
         ${on ? `<circle cx="${x}" cy="${y}" r="26" fill="${cls === "good" ? "var(--glow)" : "transparent"}" opacity=".6"/>` : ""}
         <circle cx="${x}" cy="${y}" r="18" fill="var(--surface-2)" stroke="${col[cls]}" stroke-width="3"/>
         <circle cx="${x}" cy="${y}" r="5" fill="${col[cls]}"/>
@@ -392,7 +518,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     svg.innerHTML = links + nodes;
     svg.querySelectorAll(".node").forEach((g) => {
       const l = L[+g.dataset.i];
-      const show = () => { $("layerDetail").textContent = `${l.name}: ${l.detail}`; };
+      const show = () => { $("layerDetail").textContent = `${l.name}: ${LAYER_PLAIN[l.id] || ""} Now: ${l.detail}`; };
       g.onmouseenter = show; g.onfocus = show;
     });
   }
@@ -638,6 +764,57 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
       : `<div><span class="sub">No block-size prints detected (≥ 20 lots and top 1% of this contract's updates).</span></div>`;
   }
 
+  // ---------- trade history (every day, from MongoDB / saved calls) ----------
+  const histOpen = new Set();
+  let histData = null;
+  const inr = (v) => (v == null ? "—" : `${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}`);
+  const rr = (v) => (v == null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}R`);
+  const cls = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
+  function fmtDay(d) { try { return new Date(d + "T12:00:00+05:30").toLocaleDateString("en-IN", {weekday: "short", day: "2-digit", month: "short"}); } catch { return d; } }
+  function renderHistory() {
+    const H = histData;
+    if (!H || !(H.days || []).length) { $("histTotal").textContent = "No saved calls yet."; $("histTbl").innerHTML = ""; return; }
+    const T = H.total || {};
+    $("histTotal").innerHTML = `${T.days} day(s) · ${T.calls} calls · ${T.wins}W / ${T.losses}L` +
+      (T.win_rate != null ? ` (${Math.round(T.win_rate * 100)}%)` : "") +
+      ` · <span class="${cls(T.sum_r)}">${rr(T.sum_r)}</span> · <span class="${cls(T.pnl_per_lot)}">${inr(T.pnl_per_lot)} / lot</span>` +
+      ` · green days ${T.green_days}/${T.days}`;
+    let body = "";
+    for (const D of H.days) {
+      const open = histOpen.has(D.day);
+      body += `<tr class="day${open ? " open" : ""}" data-day="${esc(D.day)}"><td style="text-align:left">${esc(fmtDay(D.day))}</td>` +
+        `<td>${D.calls}</td><td>${D.wins}W / ${D.losses}L${D.open ? ` · ${D.open} open` : ""}</td>` +
+        `<td>${D.win_rate != null ? Math.round(D.win_rate * 100) + "%" : "—"}</td>` +
+        `<td class="${cls(D.sum_r)}">${rr(D.sum_r)}</td><td class="${cls(D.pnl_per_lot)}">${inr(D.pnl_per_lot)}</td></tr>`;
+      if (open) {
+        let inner = "";
+        for (const t of D.trades) {
+          const res = t.status !== "closed" ? `<span class="oc live">${esc(t.status)}</span>`
+            : `<span class="oc ${t.pnl_per_lot > 0 ? "win" : t.pnl_per_lot < 0 ? "loss" : "flat"}">${esc(t.outcome || "—")}</span>`;
+          inner += `<tr><td style="text-align:left">${esc(t.time || "")}${t.exit_time ? "→" + esc(t.exit_time) : ""}</td>` +
+            `<td style="text-align:left">${t.dir > 0 ? "▲" : "▼"} ${esc(t.symbol || t.und)}</td>` +
+            `<td>${t.entry != null ? Number(t.entry).toFixed(2) : "—"} → ${t.exit != null ? Number(t.exit).toFixed(2) : "—"}</td>` +
+            `<td>${res}</td><td class="${cls(t.r_now)}">${rr(t.r_now)}</td><td class="${cls(t.pnl_per_lot)}">${inr(t.pnl_per_lot)}</td></tr>`;
+        }
+        body += `<tr class="trade"><td colspan="6" style="padding:0 0 6px 18px"><table class="calls"><thead><tr>` +
+          `<th style="text-align:left">Time</th><th style="text-align:left">Option</th><th>Entry → exit</th><th>Result</th>` +
+          `<th>R</th><th>P&amp;L / lot</th></tr></thead><tbody>${inner}</tbody></table></td></tr>`;
+      }
+    }
+    $("histTbl").innerHTML = `<thead><tr><th style="text-align:left">Day</th><th>Calls</th><th>Wins / losses</th>` +
+      `<th>Win %</th><th>R</th><th>P&amp;L / lot</th></tr></thead><tbody>${body}</tbody>`;
+    $("histTbl").querySelectorAll("tr.day").forEach((tr) => tr.onclick = () => {
+      const d = tr.dataset.day; histOpen.has(d) ? histOpen.delete(d) : histOpen.add(d); renderHistory();
+    });
+  }
+  async function loadHistory() {
+    try { const r = await fetch("/api/history", {cache: "no-store"});
+          if (r.ok) { histData = await r.json(); if (!histOpen.size && histData.days && histData.days[0]) histOpen.add(histData.days[0].day); renderHistory(); }
+          else $("histTotal").textContent = "Trade history unavailable right now.";
+    } catch { $("histTotal").textContent = "Trade history unavailable right now."; }
+  }
+  loadHistory(); setInterval(loadHistory, 60_000);
+
   // ---------- rule switches (saved on the server; the brain applies them within ~15 s) ----------
   let ruleSettings = {}, ruleCanEdit = false;
   const SW = {allow_afternoon: ["sw-afternoon", "🌇 Afternoon calls", false], dd_stop: ["sw-dd", "🛑 Drawdown stop", true]};
@@ -649,7 +826,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
       b.setAttribute("aria-pressed", String(!!want));
       b.textContent = `${label}: ${want ? "on" : "off"}${now !== want ? " (applying…)" : ""}`;
       b.disabled = !ruleCanEdit;
-      if (!ruleCanEdit) b.title = b.title.split(" [")[0] + " [view only]";
+      if (!ruleCanEdit && b.dataset.info && !b.dataset.info.endsWith("(view only)")) b.dataset.info += " (view only)";
     }
   }
   async function loadSwitches() {
@@ -837,6 +1014,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
   function onState(obj) {
     state = obj; lastMsgAt = Date.now();
     try { paintSwitches((obj.signals || {}).rules); } catch {}
+    try { $("brand").classList.toggle("live", obj.mode === "live"); } catch {}
     if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; render(); renderAge(); }); }
   }
   let es = null, pollTimer = null;

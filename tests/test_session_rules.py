@@ -130,3 +130,15 @@ def test_local_ui_settings_endpoint_with_csrf_guards(tmp_path):
         assert st.get() == {"allow_afternoon": True}
     finally:
         srv.stop()
+
+
+def test_regime_layer_shows_labelling_with_current_reading():
+    from types import SimpleNamespace
+    from tbrain.brain.state import BrainState
+    sig = {"diagnostics": {"NIFTY": {"regime": {"label": "range"}}, "SENSEX": {"regime": {"label": "trend"}}}}
+    off = SimpleNamespace(engine=SimpleNamespace(cfg=EngineConfig()))
+    lay = BrainState._regime_layer(off, sig)
+    assert lay["status"] == "labelling" and "NIFTY range · SENSEX trend" in lay["detail"] and "not blocking" in lay["detail"]
+    assert BrainState._regime_layer(off, {})["status"] == "off"
+    on = SimpleNamespace(engine=SimpleNamespace(cfg=EngineConfig(regime_gate=True)))
+    assert BrainState._regime_layer(on, sig)["status"] == "on"

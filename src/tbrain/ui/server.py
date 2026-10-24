@@ -76,7 +76,7 @@ def current_state(s: Settings, force_demo: bool = False) -> dict:
             "signals": {"status": "observing", "calls": [], "reason": "No data yet", "scoreboard": {"calls": 0}}}
 
 
-def make_handler(bc: Broadcaster, settings_store=None):
+def make_handler(bc: Broadcaster, settings_store=None, history=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -123,6 +123,12 @@ def make_handler(bc: Broadcaster, settings_store=None):
             elif path == "/api/stream":
                 self.close_connection = True
                 self._stream()
+            elif path == "/api/history":
+                try:
+                    body = json.dumps(history() if history else {"days": [], "total": {}}, default=str).encode()
+                    self._send(200, body, "application/json")
+                except Exception as e:  # noqa: BLE001
+                    self._send(503, json.dumps({"error": repr(e)}).encode(), "application/json")
             elif path == "/api/settings":
                 body = json.dumps({"settings": settings_store.get() if settings_store else {},
                                    "can_edit": settings_store is not None}).encode()
@@ -165,9 +171,9 @@ class _QuietServer(ThreadingHTTPServer):
 
 
 class UIServer:
-    def __init__(self, bc: Broadcaster, port: int = 8765, settings_store=None):
+    def __init__(self, bc: Broadcaster, port: int = 8765, settings_store=None, history=None):
         self.bc, self.port = bc, port
-        self.srv = _QuietServer(("127.0.0.1", port), make_handler(bc, settings_store))
+        self.srv = _QuietServer(("127.0.0.1", port), make_handler(bc, settings_store, history))
         self.srv.daemon_threads = True
         self.url = f"http://127.0.0.1:{port}/"
         self._t: threading.Thread | None = None
@@ -190,7 +196,9 @@ def serve(s: Settings, port: int = 8765, force_demo: bool = False, open_browser:
     provider = provider or (lambda: current_state(s, force_demo))
     try:
         from tbrain.runtime_settings import FileSettings
-        ui = UIServer(bc, port, FileSettings(s.data_dir / "live" / "settings.json")).start()
+        from tbrain.history import from_files
+        ui = UIServer(bc, port, FileSettings(s.data_dir / "live" / "settings.json"),
+                      history=lambda: from_files(s.data_dir)).start()
     except OSError as e:
         print(f"Port {port} busy ({e}). If `tbrain record` is running, its UI is already at http://127.0.0.1:{port}/")
         return
