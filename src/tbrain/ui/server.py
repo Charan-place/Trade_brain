@@ -76,7 +76,7 @@ def current_state(s: Settings, force_demo: bool = False) -> dict:
             "signals": {"status": "observing", "calls": [], "reason": "No data yet", "scoreboard": {"calls": 0}}}
 
 
-def make_handler(bc: Broadcaster):
+def make_handler(bc: Broadcaster, settings_store=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -123,8 +123,32 @@ def make_handler(bc: Broadcaster):
             elif path == "/api/stream":
                 self.close_connection = True
                 self._stream()
+            elif path == "/api/settings":
+                body = json.dumps({"settings": settings_store.get() if settings_store else {},
+                                   "can_edit": settings_store is not None}).encode()
+                self._send(200, body, "application/json")
             else:
                 self._send(404, b"not found", "text/plain")
+
+        def do_POST(self):  # noqa: N802
+            # Dashboard switches. CSRF guard for a localhost server: JSON body only (a cross-site <form> cannot send
+            # it without a CORS preflight, which we never answer) and, when present, the Origin must be this server.
+            path = self.path.split("?", 1)[0]
+            origin = self.headers.get("Origin")
+            host = self.headers.get("Host", "")
+            if path != "/api/settings" or settings_store is None:
+                self._send(404, b"not found", "text/plain"); return
+            if "application/json" not in (self.headers.get("Content-Type") or ""):
+                self._send(415, b"json only", "text/plain"); return
+            if origin and origin not in (f"http://{host}", f"https://{host}"):
+                self._send(403, b"bad origin", "text/plain"); return
+            try:
+                n = min(int(self.headers.get("Content-Length") or 0), 4096)
+                changes = json.loads(self.rfile.read(n) or b"{}")
+                cur = settings_store.update(changes if isinstance(changes, dict) else {})
+            except (ValueError, OSError):
+                self._send(400, b"bad request", "text/plain"); return
+            self._send(200, json.dumps({"settings": cur, "can_edit": True}).encode(), "application/json")
 
         def log_message(self, *a):
             pass
@@ -141,9 +165,9 @@ class _QuietServer(ThreadingHTTPServer):
 
 
 class UIServer:
-    def __init__(self, bc: Broadcaster, port: int = 8765):
+    def __init__(self, bc: Broadcaster, port: int = 8765, settings_store=None):
         self.bc, self.port = bc, port
-        self.srv = _QuietServer(("127.0.0.1", port), make_handler(bc))
+        self.srv = _QuietServer(("127.0.0.1", port), make_handler(bc, settings_store))
         self.srv.daemon_threads = True
         self.url = f"http://127.0.0.1:{port}/"
         self._t: threading.Thread | None = None
@@ -165,7 +189,8 @@ def serve(s: Settings, port: int = 8765, force_demo: bool = False, open_browser:
     bc = Broadcaster()
     provider = provider or (lambda: current_state(s, force_demo))
     try:
-        ui = UIServer(bc, port).start()
+        from tbrain.runtime_settings import FileSettings
+        ui = UIServer(bc, port, FileSettings(s.data_dir / "live" / "settings.json")).start()
     except OSError as e:
         print(f"Port {port} busy ({e}). If `tbrain record` is running, its UI is already at http://127.0.0.1:{port}/")
         return

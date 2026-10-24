@@ -102,8 +102,22 @@ svg text{fill:var(--muted);font-size:11px}
 #tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--ring),0 6px 24px rgba(0,0,0,.25);border-radius:8px;padding:8px 10px;font-size:12px;display:none;z-index:10;max-width:320px;font-variant-numeric:tabular-nums}
 #tip b{font-weight:600}
 footer{margin-top:16px;font-size:12px;color:var(--muted)}
+.tfbar{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:0 0 8px}
+.tf{border:0;background:var(--surface-2);color:var(--ink-2);padding:4px 10px;border-radius:6px;cursor:pointer;font:inherit;font-size:12px}
+.tf[aria-pressed="true"]{background:var(--call);color:#fff}
+.ovl{font-size:12px;color:var(--ink-2);display:inline-flex;gap:4px;align-items:center;margin-left:8px;cursor:pointer}
+:root{--ema9:#1baf7a;--ema21:#6250d6}
+@media (prefers-color-scheme: dark){:root:where(:not([data-theme="light"])){--ema9:#199e70;--ema21:#9085e9}}
+:root[data-theme="dark"]{--ema9:#199e70;--ema21:#9085e9}
 .row-chart{grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);margin-bottom:14px}
-@media (max-width:980px){.row-chart{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:980px){.tfbar{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:0 0 8px}
+.tf{border:0;background:var(--surface-2);color:var(--ink-2);padding:4px 10px;border-radius:6px;cursor:pointer;font:inherit;font-size:12px}
+.tf[aria-pressed="true"]{background:var(--call);color:#fff}
+.ovl{font-size:12px;color:var(--ink-2);display:inline-flex;gap:4px;align-items:center;margin-left:8px;cursor:pointer}
+:root{--ema9:#1baf7a;--ema21:#6250d6}
+@media (prefers-color-scheme: dark){:root:where(:not([data-theme="light"])){--ema9:#199e70;--ema21:#9085e9}}
+:root[data-theme="dark"]{--ema9:#199e70;--ema21:#9085e9}
+.row-chart{grid-template-columns:minmax(0,1fr)}}
 #candles,#optChart{width:100%;height:auto;display:block}
 .alertbtn{border:0;background:var(--surface);color:var(--ink);padding:6px 12px;border-radius:8px;cursor:pointer;box-shadow:0 0 0 1px var(--ring);font:inherit}
 .alertbtn[aria-pressed="true"]{box-shadow:0 0 0 2px var(--good)}
@@ -122,9 +136,21 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
 .sides{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media (max-width:640px){.sides{grid-template-columns:1fr}}
 .gates{font-size:12px;color:var(--ink-2);margin-top:8px}
-.calls{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums;margin-top:8px}
-.calls td,.calls th{padding:4px 6px;text-align:right;border-top:1px solid var(--grid)}
-.calls th{font-size:11px;color:var(--muted);font-weight:600}
+.callwrap{max-height:380px;overflow:auto;margin-top:8px;border-radius:8px;box-shadow:0 0 0 1px var(--ring)}
+.calls{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+.calls td,.calls th{padding:5px 8px;text-align:right;border-top:1px solid var(--grid);white-space:nowrap}
+.calls th{font-size:11px;color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--surface);z-index:1}
+.calls tbody tr{cursor:pointer}
+.calls tbody tr:hover td{background:var(--surface-2)}
+.calls tr.sel td{background:var(--call-wash)}
+.pos{color:var(--good-ink);font-weight:600} .neg{color:var(--crit);font-weight:600}
+.calls .rr{display:block;font-size:10.5px;font-weight:500;opacity:.85}
+.oc{display:inline-block;min-width:54px;text-align:center;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600}
+.oc.win{background:rgba(12,163,12,.15);color:var(--good-ink)} .oc.loss{background:rgba(208,59,59,.15);color:var(--crit)}
+.oc.flat{background:var(--surface-2);color:var(--ink-2)} .oc.live{box-shadow:inset 0 0 0 1.5px var(--call);color:var(--ink)}
+.daybar{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;margin-top:12px;font-size:13px;color:var(--ink-2)}
+.daybar .big{font-size:22px;font-weight:600}
+.chips{display:flex;gap:4px;margin-left:auto}
 .calls td:first-child,.calls th:first-child{text-align:left}
 .tape{font-size:12px;font-variant-numeric:tabular-nums;margin-top:6px}
 .tape div{display:flex;justify-content:space-between;gap:8px;padding:2px 0;border-top:1px solid var(--grid)}
@@ -144,6 +170,8 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     <span class="spacer"></span>
     <div class="tabs" role="tablist" id="tabs"></div>
     <select id="expiry" aria-label="Expiry"></select>
+    <button class="alertbtn" id="sw-afternoon" aria-pressed="false" data-key="allow_afternoon" title="After 13:00 the brain stops issuing NEW calls (live 19-23 Oct: 20 afternoon calls, 4 wins, -11.8R). Turn on to keep getting calls until 14:45. Blocked calls are still tracked as shadows.">🌇 Afternoon calls: off</button>
+    <button class="alertbtn" id="sw-dd" aria-pressed="true" data-key="dd_stop" title="Drawdown stop: once today's closed calls have been +2R or more and then give back 2R, no new calls for the rest of the day. Blocked calls are still tracked as shadows.">🛑 Drawdown stop: on</button>
     <button class="alertbtn" id="alerts" aria-pressed="false" title="Sound + desktop notification on new calls, T1, SL">🔕 Alerts off</button>
     <button class="themebtn" id="theme" title="Toggle theme">◐ theme</button>
   </header>
@@ -153,11 +181,20 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
   <section class="grid row-chart">
     <div class="card">
       <h2 id="chartTitle">Live chart</h2>
+      <div class="tfbar" id="tfbar" role="group" aria-label="Timeframe">
+        <button class="tf" data-tf="1">1m</button><button class="tf" data-tf="3">3m</button><button class="tf" data-tf="5">5m</button>
+        <button class="tf" data-tf="10">10m</button><button class="tf" data-tf="15">15m</button><button class="tf" data-tf="30">30m</button>
+        <label class="ovl"><input type="checkbox" id="ovVwap" checked> VWAP</label>
+        <label class="ovl"><input type="checkbox" id="ovE9" checked> EMA 9</label>
+        <label class="ovl"><input type="checkbox" id="ovE21" checked> EMA 21</label>
+      </div>
       <div class="legend">
-        <span><span class="key" style="background:var(--buy)"></span>Up candle</span>
-        <span><span class="key" style="background:var(--sell)"></span>Down candle</span>
-        <span><span class="key" style="background:var(--ink-2);height:2px;vertical-align:3px"></span>VWAP now (futures, basis-adjusted)</span>
-        <span>▲▼ call issued · lines: entry / SL / T1 / T2</span>
+        <span><span class="key" style="background:var(--buy)"></span>Up</span>
+        <span><span class="key" style="background:var(--sell)"></span>Down</span>
+        <span><span class="key" style="background:var(--ink-2);height:2px;vertical-align:3px"></span>VWAP (futures, basis-adj.)</span>
+        <span><span class="key" style="background:var(--ema9);height:2px;vertical-align:3px"></span>EMA 9</span>
+        <span><span class="key" style="background:var(--ema21);height:2px;vertical-align:3px"></span>EMA 21</span>
+        <span>▲▼ call issued · entry / SL / T1 / T2 lines</span>
       </div>
       <svg id="candles" viewBox="0 0 900 380" role="img" aria-label="1-minute candles"></svg>
       <div class="note" id="chartNote"></div>
@@ -180,12 +217,8 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
       <div class="sig-state"><span class="dot warn" id="sigDot"></span><span id="sigState">—</span> <span class="badge exp" id="sigLabel"></span></div>
       <div class="sides" id="sides"></div>
       <div class="gates" id="gates"></div>
-      <div class="score" style="margin-top:12px">
-        <div><b id="scCalls">0</b><span>calls (closed)</span></div>
-        <div><b id="scHit">—</b><span>hit T1 before SL</span></div>
-        <div><b id="scR">—</b><span>avg R after est. costs</span></div>
-      </div>
-      <table class="calls" id="callsTbl"></table>
+      <div class="daybar" id="daybar"></div>
+      <div class="callwrap"><table class="calls" id="callsTbl"></table></div>
       <div class="note" id="sigReason"></div>
     </div>
     </div>
@@ -250,6 +283,9 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
 
   let state = null;
   let hover = null;
+  let tf = +(store.get("tb.tf") || 1);
+  let chartHover = null;   // {x, e} while the mouse is over the candle chart
+  const ov = {vwap: store.get("tb.ov.vwap") !== "0", e9: store.get("tb.ov.e9") !== "0", e21: store.get("tb.ov.e21") !== "0"};
   let lastMsgAt = 0;
   let und = store.get("tb.und") || "NIFTY";
   let exp = null;
@@ -274,6 +310,9 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     tip.style.left = `${x}px`; tip.style.top = `${y}px`;
   };
   const hideTip = () => { tip.style.display = "none"; };
+  document.addEventListener("mousemove", (e) => {
+    if (!(e.target.closest && e.target.closest('[data-tip]'))) { hover = null; chartHover = null; hideTip(); }
+  }, true);
 
   function pill(id, cls, text) {
     const el = $(id); el.querySelector(".dot").className = `dot ${cls}`; el.querySelector("span:last-child").textContent = text;
@@ -369,10 +408,15 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     if (D && D.sides) {
       $("sides").innerHTML = ["bullish", "bearish"].map((k) => {
         const sd = D.sides[k]; if (!sd) return "";
-        const items = sd.conditions.map((c) => `<li class="${c.ok ? "ok" : "no"}"><span class="ic">${c.ok ? "✓" : "·"}</span><span>${esc(c.text)}</span></li>`).join("");
+        const must = (sd.required || []).map((c) => `<li class="${c.ok ? "ok" : "no"}"><span class="ic">${c.ok ? "✓" : "✗"}</span><span><b>${esc(c.text)}</b></span></li>`).join("");
+        const items = must + sd.conditions.map((c) => `<li class="${c.ok ? "ok" : "no"}"><span class="ic">${c.ok ? "✓" : "·"}</span><span>${esc(c.text)}</span></li>`).join("");
         return `<div><b>${k === "bullish" ? "▲ Bullish" : "▼ Bearish"} ${sd.score}/${sd.max}</b> <span class="sub">(needs ${D.min_score}+ & trigger)</span>
           <ul class="check">${items}<li class="${sd.trigger ? "ok" : "no"}"><span class="ic">${sd.trigger ? "✓" : "·"}</span><span>Trigger: ${esc(sd.trigger || "no breakout of the last 10 one-minute candles")}</span></li></ul></div>`;
       }).join("");
+      const R = D.regime || {};
+      const rcls = R.label === "trend" ? "good" : R.label === "range" ? "crit" : "warn";
+      const regimeLine = R.label ? `<div style="margin:8px 0;font-size:12.5px"><span class="dot ${rcls}" style="display:inline-block;vertical-align:1px"></span> <b>Regime: ${esc(R.label)}</b> · efficiency ${R.er60 === null || R.er60 === undefined ? "—" : R.er60.toFixed(2)} · VWAP crosses (60m) ${R.vwap_crosses60 ?? "—"}${R.vs_ib ? ` · price ${esc(R.vs_ib)} initial balance` : ""}</div>` : "";
+      $("sides").insertAdjacentHTML("afterbegin", regimeLine.replace("<div", '<div style="grid-column:1/-1"'));
       const g = (D.gates || []).map((x) => `⛔ ${esc(x)}`);
       if (D.blocked) g.push(`⛔ blocked: ${esc(D.blocked)}`);
       $("gates").innerHTML = g.length ? g.join("<br>") : "✓ all gates open";
@@ -380,68 +424,97 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
       $("sides").innerHTML = `<div class="empty">The rule engine runs while <code>tbrain record</code> is live.</div>`;
       $("gates").textContent = "";
     }
-    const sc = S.scoreboard || {};
-    $("scCalls").textContent = `${sc.calls ?? 0} (${sc.closed ?? 0})`;
-    $("scHit").textContent = sc.hit_t1 === null || sc.hit_t1 === undefined ? "—" : pct(sc.hit_t1, 0);
-    $("scR").textContent = sc.avg_r === null || sc.avg_r === undefined ? "—" : fmt(sc.avg_r);
-    const rows = (S.calls || []).slice(0, 8).map((c) => {
-      const t = new Date(c.issued_ms).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit"});
-      return `<tr><td>${esc(t)} ${esc(c.symbol)}</td><td>${fmt(c.entry)}</td><td>${esc(c.outcome || (c.t1_hit ? "T1 ✓ running" : "open"))}</td><td>${signed(c.pnl_per_lot, (x) => "₹" + fmt(x, 0))}</td><td>${fmt(c.r_now)}R</td></tr>`;
-    }).join("");
-    $("callsTbl").innerHTML = rows ? `<tr><th>Call</th><th>Entry</th><th>Status</th><th>P&L / lot</th><th>R</th></tr>${rows}` : "";
-    $("sigReason").textContent = S.reason || "";
+    renderCallsTable(S);
+    const SH = (S.shadow && S.shadow.by_blocker) || {};
+    const shRows = Object.entries(SH).map(([k, v]) => `<span>${esc(k)}: ${v.n} blocked · <b class="${v.sum_r < 0 ? "pos" : v.sum_r > 0 ? "neg" : ""}">${v.sum_r < 0 ? "saved" : v.sum_r > 0 ? "cost" : "±"} ${Math.abs(v.sum_r).toFixed(2)}R</b></span>`);
+    $("sigReason").innerHTML = (shRows.length ? `<div style="margin-bottom:6px"><b>Filter scorecard today</b> (shadow-tracked blocked candidates): ${shRows.join(" · ")}</div>` : "") + esc(S.reason || "");
   }
 
   // ---------- candlestick chart (shared by index + option) ----------
   function drawCandles(svg, bars, o) {
-    const W = o.W, H = o.H, m = {l: 8, r: 64, t: 10, b: 22};
-    if (!bars || !bars.length) { svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle">${esc(o.empty || "Waiting for live ticks…")}</text>`; return; }
+    const W = o.W, H = o.H, m = {l: 8, r: 70, t: 10, b: 22};
+    if (!bars || !bars.length) { svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle">${esc(o.empty || "Waiting for live ticks…")}</text>`; return null; }
+    const barMs = o.barMs || 60000;
     const lines = (o.lines || []).filter((l) => l.y !== null && l.y !== undefined && isFinite(l.y));
+    const overlays = (o.overlays || []).filter((x) => x && x.values && x.values.some((v) => v !== null && v !== undefined));
     let lo = Math.min(...bars.map((b) => b[3])), hi = Math.max(...bars.map((b) => b[2]));
     for (const l of lines) { lo = Math.min(lo, l.y); hi = Math.max(hi, l.y); }
-    for (const v of (o.overlay || [])) if (v !== null && v !== undefined) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    for (const ovl of overlays) for (const v of ovl.values) if (v !== null && v !== undefined) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
     const pad = Math.max((hi - lo) * 0.06, 0.5); lo -= pad; hi += pad;
     const n = bars.length, bw = (W - m.l - m.r) / Math.max(n, 30);
     const X = (i) => m.l + (i + 0.5) * bw;
     const Y = (v) => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
     let g = "";
+    // level tags: true line at the price, tag nudged apart so tags never overlap
+    const tags = lines.map((l) => ({...l, ly: Y(l.y), ty: Y(l.y)})).sort((p, q) => p.ty - q.ty);
+    for (let i = 1; i < tags.length; i++) if (tags[i].ty - tags[i - 1].ty < 19) tags[i].ty = tags[i - 1].ty + 19;
+    const over = tags.length ? tags[tags.length - 1].ty - (H - m.b - 9) : 0;
+    if (over > 0) for (const t of tags) t.ty -= over;
     for (let i = 0; i <= 4; i++) {
       const v = lo + (hi - lo) * i / 4, y = Y(v);
       g += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y}" y2="${y}"/>`;
-      if (!lines.some((l) => Math.abs(Y(l.y) - y) < 14)) g += `<text x="${W - m.r + 6}" y="${y + 4}">${fmt(v, o.dp ?? 0)}</text>`;  // don't collide with level tags
+      if (!tags.some((t) => Math.abs(t.ty - y) < 14)) g += `<text x="${W - m.r + 6}" y="${y + 4}">${fmt(v, o.dp ?? 0)}</text>`;
     }
     const maxLabels = Math.max(2, Math.floor((W - m.l - m.r) / 52));
     const step = Math.max(1, Math.ceil(n / maxLabels));
     bars.forEach((b, i) => { if (i % step === 0) g += `<text x="${X(i)}" y="${H - 6}" text-anchor="middle">${new Date(b[0]).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit", hour12: false})}</text>`; });
-    const cw = Math.max(1, Math.min(8, bw - 2));
+    const cw = Math.max(1, Math.min(10, bw - 2));
     bars.forEach((b, i) => {
       const up = b[4] >= b[1], c = up ? "var(--buy)" : "var(--sell)";
       const y1 = Y(Math.max(b[1], b[4])), y2 = Y(Math.min(b[1], b[4]));
       g += `<line x1="${X(i)}" x2="${X(i)}" y1="${Y(b[2])}" y2="${Y(b[3])}" stroke="${c}" stroke-width="1"/>`;
       g += `<rect x="${X(i) - cw / 2}" y="${y1}" width="${cw}" height="${Math.max(1, y2 - y1)}" rx="1" fill="${c}"/>`;
     });
-    if (o.overlaySeries && o.overlaySeries.length > 1) {
-      g += `<path d="${o.overlaySeries.map((v, i) => v === null ? "" : `${i && o.overlaySeries[i - 1] !== null ? "L" : "M"}${X(i)},${Y(v)}`).join("")}" fill="none" stroke="var(--ink-2)" stroke-width="1.5" opacity=".7"/>`;
+    for (const ovl of overlays) {
+      let d = "", pen = false;
+      ovl.values.forEach((v, i) => { if (v === null || v === undefined) { pen = false; return; } d += `${pen ? "L" : "M"}${X(i)},${Y(v)}`; pen = true; });
+      if (d) g += `<path d="${d}" fill="none" stroke="${ovl.color}" stroke-width="${ovl.w || 1.5}" stroke-linejoin="round" opacity="${ovl.op || 0.9}"/>`;
     }
     const col = {sl: "var(--crit)", t: "var(--good)", entry: "var(--ink-2)", last: "var(--ink)"};
-    for (const l of lines) {
-      const y = Y(l.y);
-      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y}" y2="${y}" stroke="${col[l.kind] || "var(--axis)"}" stroke-width="${l.kind === "last" ? 1 : 1.5}" ${l.kind === "last" ? 'opacity=".5"' : ""}/>`;
-      g += `<rect x="${W - m.r + 2}" y="${y - 9}" width="${m.r - 4}" height="18" rx="4" fill="var(--surface-2)" stroke="${col[l.kind] || "var(--axis)"}"/><text x="${W - m.r + 6}" y="${y + 4}" style="fill:var(--ink);font-size:10.5px">${esc(l.label)}</text>`;
+    for (const t of tags) {
+      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${t.ly}" y2="${t.ly}" stroke="${col[t.kind] || "var(--axis)"}" stroke-width="${t.kind === "last" ? 1 : 1.5}" ${t.kind === "last" ? 'opacity=".5"' : ""}/>`;
+      if (Math.abs(t.ty - t.ly) > 1) g += `<line x1="${W - m.r}" x2="${W - m.r + 2}" y1="${t.ly}" y2="${t.ty}" stroke="${col[t.kind] || "var(--axis)"}"/>`;
+      g += `<rect x="${W - m.r + 2}" y="${t.ty - 9}" width="${m.r - 4}" height="18" rx="4" fill="var(--surface-2)" stroke="${col[t.kind] || "var(--axis)"}"/><text x="${W - m.r + 6}" y="${t.ty + 4}" style="fill:var(--ink);font-size:10.5px">${esc(t.label)}</text>`;
     }
     for (const mk of (o.markers || [])) {
-      const i = bars.findIndex((b) => b[0] <= mk.t && mk.t < b[0] + 60000);
+      const i = bars.findIndex((b) => b[0] <= mk.t && mk.t < b[0] + barMs);
       if (i < 0) continue;
       const x = X(i), y = mk.dir > 0 ? Y(bars[i][3]) + 14 : Y(bars[i][2]) - 6;
       g += `<text x="${x}" y="${y}" text-anchor="middle" style="fill:${mk.dir > 0 ? "var(--buy)" : "var(--sell)"};font-size:14px;font-weight:700">${mk.dir > 0 ? "▲" : "▼"}</text>`;
     }
+    if (o.hover) g += `<line class="xh axisline" y1="${m.t}" y2="${H - m.b}" x1="-10" x2="-10"/><rect class="hit" data-tip="1" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/>`;
     svg.innerHTML = g;
+    return {X, bw, m, W, n};
   }
+
+  // ---- timeframe aggregation (aligned to 09:15 IST like NSE/BSE charts) ----
+  const IST_MS = 19800000;
+  function istOpenMs(t) { const d = new Date(t + IST_MS); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 9, 15) - IST_MS; }
+  function bucketOf(t, mins) { const o = istOpenMs(t), w = mins * 60000; return o + Math.floor((t - o) / w) * w; }
+  function aggregate(bars, mins) {
+    if (mins === 1) return bars.map((b) => b.slice());
+    const out = []; let cur = null;
+    for (const b of bars) {
+      const k = bucketOf(b[0], mins);
+      if (!cur || cur[0] !== k) { if (cur) out.push(cur); cur = [k, b[1], b[2], b[3], b[4], b[5] || 0]; }
+      else { cur[2] = Math.max(cur[2], b[2]); cur[3] = Math.min(cur[3], b[3]); cur[4] = b[4]; cur[5] += b[5] || 0; }
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+  function ema(vals, p) { const k = 2 / (p + 1); let e = null; return vals.map((v, i) => (e = e === null ? v : v * k + e * (1 - k), i >= p - 1 ? e : null)); }
+
+  document.querySelectorAll("#tfbar .tf").forEach((b) => b.onclick = () => { tf = +b.dataset.tf; store.set("tb.tf", tf); render(); });
+  [["ovVwap", "vwap"], ["ovE9", "e9"], ["ovE21", "e21"]].forEach(([id, k]) => {
+    const el = $(id); el.checked = ov[k]; el.onchange = () => { ov[k] = el.checked; store.set(`tb.ov.${k}`, el.checked ? "1" : "0"); render(); };
+  });
 
   function renderChart() {
     const U = state.underlyings[und]; const S = state.signals || {};
-    const bars = (U && U.candles) || [];
-    $("chartTitle").textContent = `Live chart · ${und} · 1-min`;
+    const raw = (U && U.candles) || [];
+    const bars = aggregate(raw, tf);
+    document.querySelectorAll("#tfbar .tf").forEach((b) => b.setAttribute("aria-pressed", +b.dataset.tf === tf));
+    $("chartTitle").textContent = `Live chart · ${und} · ${tf}-min`;
     const calls = (S.calls || []).filter((c) => c.und === und);
     const act = calls.find((c) => c.status === "open" || c.status === "t1");
     const lines = [];
@@ -452,35 +525,104 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
       lines.push({y: act.u_t1, kind: "t", label: `T1 ${fmt(act.u_t1, 0)}`});
       lines.push({y: act.u_t2, kind: "t", label: `T2 ${fmt(act.u_t2, 0)}`});
     }
-    // VWAP overlay: futures VWAP shifted by current basis, drawn flat at the latest value per bar we know of
-    const vw = U && U.vwap_index_equiv;
-    drawCandles($("candles"), bars, {W: 900, H: 380, dp: 0, lines, overlay: [vw],
-      overlaySeries: vw ? bars.map(() => vw) : null, markers: calls.map((c) => ({t: c.issued_ms, dir: c.dir})),
+    const overlays = [];
+    if (ov.vwap) {
+      let vw;
+      if (U && U.vwap_series && U.vwap_series.length) {      // real per-minute VWAP history
+        const byB = new Map(); for (const [t, v] of U.vwap_series) byB.set(bucketOf(t, tf), v);
+        vw = bars.map((b) => byB.has(b[0]) ? byB.get(b[0]) : null);
+      } else if (U && U.vwap_index_equiv) vw = bars.map(() => U.vwap_index_equiv);  // current value only
+      if (vw) overlays.push({values: vw, color: "var(--ink-2)", w: 1.5, op: 0.75});
+    }
+    const closes = bars.map((b) => b[4]);
+    if (ov.e9) overlays.push({values: ema(closes, 9), color: "var(--ema9)", w: 1.5});
+    if (ov.e21) overlays.push({values: ema(closes, 21), color: "var(--ema21)", w: 1.5});
+    const svg = $("candles");
+    const geo = drawCandles(svg, bars, {W: 900, H: 380, dp: 0, lines, overlays, barMs: tf * 60000, hover: true,
+      markers: calls.map((c) => ({t: c.issued_ms, dir: c.dir})),
       empty: state.mode === "live" ? "Waiting for live ticks…" : "Candles build from live ticks while recording (none in this replay)."});
-    $("chartNote").textContent = bars.length ? `${bars.length} one-minute candles built from live ${und} index ticks · VWAP ${fmt(vw)} (index-equivalent)` : "";
+    if (geo) {
+      const hit = svg.querySelector(".hit"), xh = svg.querySelector(".xh");
+      const show = (e) => {
+        const r = svg.getBoundingClientRect(); const vx = (e.clientX - r.left) / r.width * geo.W;
+        const i = Math.max(0, Math.min(bars.length - 1, Math.floor((vx - geo.m.l) / geo.bw)));
+        const b = bars[i]; if (!b) return;
+        xh.setAttribute("x1", geo.X(i)); xh.setAttribute("x2", geo.X(i));
+        const prev = i > 0 ? bars[i - 1][4] : b[1]; const ch = b[4] - prev;
+        const t = new Date(b[0]).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit", hour12: false});
+        const e9 = ov.e9 ? ema(closes, 9)[i] : null, e21 = ov.e21 ? ema(closes, 21)[i] : null;
+        showTip(`<b>${esc(und)} · ${t} · ${tf}m</b><br>O ${fmt(b[1])} · H ${fmt(b[2])}<br>L ${fmt(b[3])} · C ${fmt(b[4])}<br>Δ ${signed(ch, (x) => fmt(x))} (${signed(ch / prev * 100, (x) => x.toFixed(2) + "%")})${e9 ? `<br>EMA9 ${fmt(e9)}` : ""}${e21 ? ` · EMA21 ${fmt(e21)}` : ""}`, e);
+      };
+      hit.onmousemove = (e) => { chartHover = e; show(e); };
+      hit.onmouseleave = () => { chartHover = null; hideTip(); };
+      if (chartHover) show(chartHover);     // keep crosshair + tooltip live through 4x/s re-renders
+    }
+    const note = raw.length ? `${bars.length} × ${tf}-min candles (from ${raw.length} one-minute bars of live ${und} ticks; aligned to 09:15)` : "";
+    $("chartNote").textContent = note + (tf >= 15 && bars.length < 12 ? " · longer history appears after the next recorder restart (full-day backfill)" : "");
+  }
+
+  let selectedCall = null;
+  let callFilter = store.get("tb.callFilter") || "ALL";
+  const money = (v) => signed(v, (x) => "₹" + fmt(x, 0));
+  const pnlCls = (v) => v > 0 ? "pos" : v < 0 ? "neg" : "";
+  function outcomeChip(c) {
+    if (c.status !== "closed") return `<span class="oc live">${c.t1_hit ? "T1 ✓ live" : "open"}</span>`;
+    const cls = c.pnl_per_lot > 0 ? "win" : c.pnl_per_lot < 0 ? "loss" : "flat";
+    return `<span class="oc ${cls}">${esc(c.outcome)}</span>`;
+  }
+  function renderCallsTable(S) {
+    const all = S.calls || [];
+    const D = S.today || {};
+    const tot = D.pnl_total_per_lot;
+    $("daybar").innerHTML = `
+      <span>Today</span><span class="big ${pnlCls(tot)}">${money(tot)}</span><span>per lot (closed ${money(D.pnl_closed_per_lot)} · open ${money(D.pnl_open_per_lot)})</span>
+      <span>${D.calls ?? 0} calls · <b class="pos">${D.wins ?? 0}W</b> / <b class="neg">${D.losses ?? 0}L</b>${D.open ? ` · ${D.open} open` : ""}${D.win_rate !== null && D.win_rate !== undefined ? ` · win ${pct(D.win_rate, 0)}` : ""}${D.avg_r !== null && D.avg_r !== undefined ? ` · avg ${fmt(D.avg_r)}R` : ""}</span>
+      ${Object.entries(D.by_index || {}).map(([u, v]) => `<span>${esc(u)} <b class="${pnlCls(v)}">${money(v)}</b></span>`).join("")}
+      <span class="chips">${["ALL", "NIFTY", "SENSEX"].map((f) => `<button class="tf" data-cf="${f}" aria-pressed="${f === callFilter}">${f === "ALL" ? "All" : f}</button>`).join("")}</span>`;
+    $("daybar").querySelectorAll("[data-cf]").forEach((b) => b.onclick = () => { callFilter = b.dataset.cf; store.set("tb.callFilter", callFilter); render(); });
+    const rows = all.filter((c) => callFilter === "ALL" || c.und === callFilter);
+    if (!rows.length) { $("callsTbl").innerHTML = `<tr><td style="text-align:left;color:var(--muted)">No calls yet today.</td></tr>`; return; }
+    const body = rows.map((c) => {
+      const t = new Date(c.issued_ms).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit", hour12: false});
+      const now = c.status === "closed" ? c.exit : c.last_bid;
+      return `<tr data-id="${esc(c.id)}" class="${c.id === selectedCall ? "sel" : ""}">
+        <td style="text-align:left">${esc(t)}</td>
+        <td style="text-align:left">${c.dir > 0 ? "▲" : "▼"} ${esc(c.und)} ${fmt(c.strike, 0)} ${esc(c.kind)} <span class="sub">${esc((c.expiry || "").slice(5))}</span></td>
+        <td>${fmt(c.entry)}</td><td>${fmt(now)}</td><td>${outcomeChip(c)}</td>
+        <td class="${pnlCls(c.pnl_per_lot)}">${money(c.pnl_per_lot)}<span class="rr">${fmt(c.r_now)}R</span></td></tr>`;
+    }).join("");
+    $("callsTbl").innerHTML = `<thead><tr><th style="text-align:left">Time</th><th style="text-align:left">Option</th><th>Entry</th><th>Exit / now</th><th>Result</th><th>P&L / lot · R</th></tr></thead><tbody>${body}</tbody>`;
+    $("callsTbl").querySelectorAll("tbody tr[data-id]").forEach((tr) => tr.onclick = () => {
+      selectedCall = selectedCall === tr.dataset.id ? null : tr.dataset.id;   // click again to go back to the live call
+      const c = all.find((x) => x.id === tr.dataset.id);
+      if (c && c.und !== und) { und = c.und; store.set("tb.und", und); }
+      render();
+    });
   }
 
   function renderTrade() {
     const S = state.signals || {};
     const calls = (S.calls || []).filter((c) => c.und === und);
-    const c = calls.find((x) => x.status === "open" || x.status === "t1") || calls[0];
+    const c = (selectedCall && (S.calls || []).find((x) => x.id === selectedCall)) || calls.find((x) => x.status === "open" || x.status === "t1") || calls[0];
     if (!c) { $("tradeBody").innerHTML = `<div class="empty">No call yet. When every gate passes, the call appears here with its option, expiry, entry, SL and targets.</div>`; $("optChart").innerHTML = ""; return; }
     const live = c.status !== "closed";
     const left = live ? Math.max(0, (c.time_stop_ms - Date.now()) / 60000) : 0;
-    const pnlCls = c.pnl_per_lot > 0 ? "up" : c.pnl_per_lot < 0 ? "down" : "";
+    const heroCls = c.pnl_per_lot > 0 ? "up" : c.pnl_per_lot < 0 ? "down" : "";
     const lots = c.size_hint_lots === null || c.size_hint_lots === undefined ? `risk ₹${fmt(c.risk_per_lot, 0)} / lot` : (c.size_hint_lots > 0 ? `${c.size_hint_lots} lot(s) within your risk budget` : "1 lot exceeds your risk budget");
     $("tradeBody").innerHTML = `
       <div><span class="badge exp">${esc(c.label)}</span> <span class="badge">${live ? (c.t1_hit ? "T1 HIT · stop at breakeven" : "OPEN") : esc(c.outcome)}</span> <span class="badge">score ${c.score}/${c.max_score}</span></div>
       <div style="margin-top:8px;font-size:18px;font-weight:600">${esc(c.action)} · ${esc(c.symbol)}</div>
       <div class="sub" style="color:var(--ink-2)">Lot ${c.lot} · issued ${new Date(c.issued_ms).toLocaleTimeString("en-IN")} · ${live ? `time stop in ${left.toFixed(0)} min` : `closed ${c.exit_ms ? new Date(c.exit_ms).toLocaleTimeString("en-IN") : ""}`}</div>
-      <div class="hero ${pnlCls}" style="margin-top:8px">${signed(c.pnl_per_lot, (x) => "₹" + fmt(x, 0))}<span style="font-size:16px;color:var(--ink-2);font-weight:500"> / lot · ${fmt(c.r_now)}R</span></div>
+      ${selectedCall ? `<div class="sub" style="margin:6px 0">Viewing a past call · click it again in the list to return to the live call</div>` : ""}
+      <div class="hero ${heroCls}" style="margin-top:8px">${signed(c.pnl_per_lot, (x) => "₹" + fmt(x, 0))}<span style="font-size:16px;color:var(--ink-2);font-weight:500"> / lot · ${fmt(c.r_now)}R</span></div>
       <div class="sub">bid now ${fmt(c.last_bid)} vs entry ${fmt(c.entry)} · best ₹${fmt(c.mfe, 0)} · worst ₹${fmt(c.mae, 0)} · after est. costs ₹${fmt(c.cost_est_per_lot, 0)}/lot</div>
       <div class="lv"><span class="h"></span><span class="h">Option premium</span><span class="h">${esc(c.und)} level</span>
         <span>Entry</span><span>${fmt(c.entry)} <span class="sub">(zone ${fmt(c.entry_zone[0])}–${fmt(c.entry_zone[1])})</span></span><span>${fmt(c.u_entry, 1)}</span>
         <span style="color:var(--crit)">Stop loss</span><span>${fmt(c.p_sl)}</span><span>${fmt(c.u_sl, 1)}${c.t1_hit ? " → BE " + fmt(c.u_sl_active, 1) : ""}</span>
         <span style="color:var(--good-ink)">Target 1</span><span>${fmt(c.p_t1)}</span><span>${fmt(c.u_t1, 1)}</span>
         <span style="color:var(--good-ink)">Target 2</span><span>${fmt(c.p_t2)}</span><span>${fmt(c.u_t2, 1)}</span></div>
-      <div class="sub">Net R:R to T1 ${fmt(c.rr_net)} · ${esc(lots)} · IV at entry ${pct(c.iv_at_entry, 1)}</div>
+      <div class="sub">Net R:R to T1 ${fmt(c.rr_net)} · ${esc(lots)} · IV at entry ${pct(c.iv_at_entry, 1)}${c.stop_via ? ` · stopped via ${esc(c.stop_via)} level` : ""}</div>
+      ${(c.correlated_with || []).length ? `<div style="margin-top:6px;font-size:12.5px;color:var(--ink)">⚠ <b>Correlated:</b> same-direction call already open on ${esc(c.correlated_with.join(", "))} — Nifty and Sensex move together, so taking both is one bet at double risk.</div>` : ""}
       <div style="margin-top:8px;font-size:12px;color:var(--ink)"><b>Why</b> · trigger: ${esc(c.trigger)}</div>
       <ul class="why">${(c.reasons || []).map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
       ${(c.evidence || []).length ? `<div style="font-size:12px;margin-top:6px"><b>Evidence · big prints on this side</b> <span class="sub">(exchange data is anonymous: what, how much, when — never who)</span></div><ul class="ev">${c.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>` : ""}`;
@@ -495,6 +637,42 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     $("tape").innerHTML = T.length ? T.map((t) => `<div><span>${new Date(t.t_ms).toLocaleTimeString("en-IN")}</span><span>${esc(t.symbol)}</span><span><b>${esc(t.side)}</b> ${fmt(t.lots, 0)} lots</span><span>@ ${fmt(t.px)}</span><span>${t.bullish ? "▲ bullish" : "▼ bearish"}</span></div>`).join("")
       : `<div><span class="sub">No block-size prints detected (≥ 20 lots and top 1% of this contract's updates).</span></div>`;
   }
+
+  // ---------- rule switches (saved on the server; the brain applies them within ~15 s) ----------
+  let ruleSettings = {}, ruleCanEdit = false;
+  const SW = {allow_afternoon: ["sw-afternoon", "🌇 Afternoon calls", false], dd_stop: ["sw-dd", "🛑 Drawdown stop", true]};
+  function paintSwitches(live) {
+    for (const [key, [id, label, dflt]] of Object.entries(SW)) {
+      const b = $(id); if (!b) continue;
+      const want = key in ruleSettings ? ruleSettings[key] : dflt;
+      const now = live && key in live ? live[key] : want;
+      b.setAttribute("aria-pressed", String(!!want));
+      b.textContent = `${label}: ${want ? "on" : "off"}${now !== want ? " (applying…)" : ""}`;
+      b.disabled = !ruleCanEdit;
+      if (!ruleCanEdit) b.title = b.title.split(" [")[0] + " [view only]";
+    }
+  }
+  async function loadSwitches() {
+    try { const r = await fetch("/api/settings", {cache: "no-store"}); if (!r.ok) return;
+          const j = await r.json(); ruleSettings = j.settings || {}; ruleCanEdit = !!j.can_edit; paintSwitches(); } catch {}
+  }
+  for (const [key, [id, , dflt]] of Object.entries(SW)) {
+    const b = $(id); if (!b) continue;
+    b.onclick = async () => {
+      if (!ruleCanEdit) return;
+      const cur = key in ruleSettings ? ruleSettings[key] : dflt;
+      const msg = key === "allow_afternoon" && !cur
+        ? "Turn ON calls after 13:00? Afternoon calls have lost money so far (20 calls, 4 wins, -11.8R over 19-23 Oct)."
+        : null;
+      if (msg && !window.confirm(msg)) return;
+      try {
+        const r = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
+                                                body: JSON.stringify({[key]: !cur})});
+        if (r.ok) { const j = await r.json(); ruleSettings = j.settings || ruleSettings; paintSwitches(); }
+      } catch {}
+    };
+  }
+  loadSwitches();
 
   // ---------- alerts: Web Audio chime + desktop notification ----------
   let audio = null, alertsOn = store.get("tb.alerts") === "1";
@@ -578,6 +756,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     }).join("");
     tbl.innerHTML = head + body;
     tbl.querySelectorAll("tr[data-i] td[data-s]").forEach((td) => {
+      td.dataset.tip = "1";
       const r = C.rows[+td.parentElement.dataset.i]; const side = td.dataset.s;
       const html = side === "CE" ? legTip("CE", r.strike, r.ce, r.call_moneyness) : legTip("PE", r.strike, r.pe, r.put_moneyness);
       td.onmousemove = (e) => { hover = {i: +td.parentElement.dataset.i, side, e}; html ? showTip(html, e) : hideTip(); };
@@ -613,7 +792,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     const line = (p, c) => p.length > 1 ? `<path d="${p.map((q, i) => `${i ? "L" : "M"}${X(q[0])},${Y(q[1])}`).join("")}" fill="none" stroke="${c}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : "";
     const dots = (p, c, hollow) => p.map((q) => `<circle cx="${X(q[0])}" cy="${Y(q[1])}" r="4" fill="${hollow ? "var(--surface)" : c}" stroke="${hollow ? c : "var(--surface)"}" stroke-width="2"/>`).join("");
     svg.innerHTML = g + line(ce, "var(--call)") + line(pe, "var(--put)") + dots(cev, "var(--call)", true) + dots(pev, "var(--put)", true) + dots(ce, "var(--call)") + dots(pe, "var(--put)")
-      + `<line id="xh" class="axisline" y1="${m.t}" y2="${H - m.b}" x1="-10" x2="-10"/><rect x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent" id="hit"/>`;
+      + `<line id="xh" class="axisline" y1="${m.t}" y2="${H - m.b}" x1="-10" x2="-10"/><rect data-tip="1" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent" id="hit"/>`;
     const hit = svg.querySelector("#hit"), xh = svg.querySelector("#xh");
     hit.onmousemove = (e) => {
       const r = svg.getBoundingClientRect(); const vx = (e.clientX - r.left) / r.width * W;
@@ -657,6 +836,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
   let pending = false;
   function onState(obj) {
     state = obj; lastMsgAt = Date.now();
+    try { paintSwitches((obj.signals || {}).rules); } catch {}
     if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; render(); renderAge(); }); }
   }
   let es = null, pollTimer = null;

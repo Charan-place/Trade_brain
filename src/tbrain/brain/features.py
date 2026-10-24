@@ -58,3 +58,12 @@ class FeatureTracker:
         i = bisect_right(ts, ts[-1] - secs)
         vals = self._v[(und, name)][i:]
         return max(vals) if vals else None
+
+    def crossings(self, und: str, name: str, secs: float, eps: float = 0.0) -> int | None:
+        """Sign changes of a series over the last `secs` (ignoring |v| <= eps): e.g. how often price crossed VWAP."""
+        ts = self._t.get((und, name))
+        if not ts or ts[-1] - ts[0] < secs * 0.5:
+            return None
+        i = bisect_right(ts, ts[-1] - secs)
+        sgn = [1 if v > eps else -1 for v in self._v[(und, name)][i:] if abs(v) > eps]
+        return sum(1 for a, b in zip(sgn, sgn[1:]) if a != b)

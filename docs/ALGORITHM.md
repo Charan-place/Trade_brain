@@ -60,3 +60,71 @@ replace the rule score with **calibrated probabilities**.
 Exchange data is **anonymous**: we see *what* traded (size, side, price, time), never *who*. Upstox's standard feed
 shows 5 depth levels and snapshot-style updates, so "big prints" are per update and may combine several trades.
 No rule set knows the future; the goal is small losses, bigger wins, and honest scoring.
+
+## v2 changes (2026-10-19, from the first live day)
+First live day: 17 calls, +3.68R. Bearish calls (with the falling market) +8.86R; all 5 bullish (counter-trend) calls lost (−5.18R);
+7/7 scores did worse than 5/7 (clues were correlated); SL exits averaged 5.8 premium points worse than planned.
+- **MUST: VWAP** — futures on the call's side of VWAP (was just 1 of 7 points).
+- **MUST: trend** — the last 60 one-minute candles moved ≥ 1.5 × ATR in the call's direction. No counter-trend calls.
+- **Futures OI clue now needs fresh positions** — OI rising with price in our direction (long/short build-up).
+  Short covering / long unwinding no longer score.
+- **Premium stop** — the call also stops when the option's bid *and* LTP fall to the SL premium (index stop still applies).
+  After T1 the premium stop moves to the entry price.
+- **Correlation warning** — a same-direction call on the other index is flagged (one bet, double risk), not blocked.
+- **Loss pause** — optional (`TBRAIN_LOSS_PAUSE_N`), off: it would have cost money in the replay.
+Replay of the 17 day-1 calls: trend + VWAP keep 12 calls, 7 wins, +8.86R (vs +3.68R). One day only — validate over more sessions.
+
+## v2.1 defaults (2026-10-19, full end-to-end replay)
+| Setup | Calls | W/L | R | ₹/lot |
+|---|---|---|---|---|
+| v1 replay (15/17 live calls matched) | 16 | 7/9 | +2.96 | +561 |
+| **v1 + trend + VWAP (= v2.1)** | 12 | 7/5 | **+6.35** | **+3,913** |
+| v2 without premium stop | 11 | 6/5 | +3.53 | +2,778 |
+| v2 (all new filters) | 12 | 5/7 | +1.09 | +375 |
+| v2 + regime gate | 3 | 2/1 | +1.06 | +808 |
+- Kept: **trend + VWAP** MUST filters.
+- Off by default: **premium stop** (−2.4R, stopped out on option noise), **fresh futures OI** (−2.8R), **regime gate** (too strict, labels need recalibration).
+- Unchanged for now: cooldown and one-open-per-index (their shadows would have made +10R / +8R, but one trend day isn't enough to loosen them).
+- The filter-only estimate (+8.86R) was optimistic: blocking a call changes which later calls fire. One day only — rerun `tbrain backtest` on every new session.
+
+## v2.2 session rules (2026-10-24, from 4 live days: 19, 21, 22, 23 Oct — 55 calls)
+| Time of entry | Calls | Wins | Sum R |
+|---|---|---|---|
+| before 12:00 | 27 | 16 | +24.70 |
+| 12:00-13:00 | 8 | 3 | +0.87 |
+| 13:00-14:45 | 20 | 4 | **−11.83** (negative on every day that traded after 13:00) |
+
+Rules tested on the same 55 calls (exact: they only remove later calls; decisions use only already-closed calls):
+| Rule | Total R | ₹/lot | Notes |
+|---|---|---|---|
+| v2.1 (live) | +13.74 | +11,772 | |
+| **no new calls after 13:00** | **+25.57** | **+22,986** | better on 19/21/23 Oct, never worse |
+| drawdown stop 2R peak / 2R give-back | +21.48 | +19,900 | better 19 & 23 Oct; 3R/3R was worse on 19 Oct (sensitive) |
+| skip 2nd index same direction | +8.00 | +5,092 | **rejected** — the 2nd index usually confirms trend moves |
+- **Afternoon cutoff 13:00** — default on. Dashboard switch *Afternoon calls* turns calls back on until 14:45.
+- **Drawdown stop** — today's closed real calls (exit order) reach a ≥ +2R peak then give back ≥ 2R → no new calls today.
+  Dashboard switch *Drawdown stop*.
+- Both are **gates that create shadows**, so the scorecard keeps measuring them ("afternoon cutoff", "drawdown stop").
+  Review after ~10 more trading days: if blocked afternoon shadows are net positive, switch the cutoff off.
+- These are discipline rules, not better predictions. In-sample (same 4 days the pattern came from): expect less than +11.8R.
+- Switches live in `data/live/settings.json` (local) or the Modal Dict (hosted); the brain re-reads them every 15 s.
+  Only the owner account can change them; viewers see them read-only.
+
+## Shadow calls (the learning loop)
+Every candidate that reaches the trigger with enough clues but is **blocked** (trend/VWAP filter, cooldown, open call,
+OI wall, R:R, spread, depth, regime gate, loss pause) is built exactly like a real call and tracked silently to its
+outcome (`data/signals/shadow.jsonl`). The **filter scorecard** (UI + `tbrain review`) sums what each blocker's
+candidates would have made: negative = the filter **saved** money, positive = it **cost** money.
+
+## Regime brain (day type)
+From completed 1-min candles: **efficiency** over 60 min (net move ÷ path length), **VWAP crossings** in 60 min, and the
+position vs the **initial balance** (09:15–10:15 range). `trend` if efficiency ≥ 0.25 and ≤ 2 crossings; `range` if
+efficiency < 0.15 or ≥ 4 crossings; else `mixed`. Logged on every call and shadow; the optional regime gate allows
+breakouts only in `trend`.
+**Range-fade playbook (shadow-only):** in a `range`, a candle that tags the 60-min extreme and closes ≥ 0.5 ATR back
+inside → fade toward VWAP (SL beyond the extreme + 0.3 ATR). It never issues live calls until the evidence supports it.
+
+## Backtesting
+`tbrain backtest --date D --compare` replays the recorded ticks + chain snapshots through the same brain and engine on
+simulated time (snapshot every 1 s; live runs every 0.25 s). The v1 preset is checked against the live session
+(fidelity = share of live calls reproduced within 2 minutes) before any v2 conclusion is trusted.

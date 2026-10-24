@@ -1,0 +1,114 @@
+annotated-doc==0.0.5
+    # via fastapi
+annotated-types==0.8.0
+    # via pydantic
+anyio==4.15.1
+    # via
+    #   httpx
+    #   starlette
+authlib==1.9.1
+    # via tbrain
+certifi==2026.10.18
+    # via
+    #   httpcore
+    #   httpx
+    #   upstox-python-sdk
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+    # via cryptography
+click==8.5.0
+    # via uvicorn
+cryptography==50.0.2
+    # via
+    #   authlib
+    #   joserfc
+    #   tbrain
+dnspython==2.8.0 ; python_full_version < '3.11'
+    # via pymongo
+dnspython==2.9.0 ; python_full_version >= '3.11'
+    # via pymongo
+exceptiongroup==1.3.1 ; python_full_version < '3.11'
+    # via anyio
+fastapi==0.159.1
+    # via tbrain
+h11==0.16.0
+    # via
+    #   httpcore
+    #   uvicorn
+httpcore==1.0.9
+    # via httpx
+httpx==0.28.1
+    # via tbrain
+idna==3.20
+    # via
+    #   anyio
+    #   httpx
+itsdangerous==2.2.0
+    # via tbrain
+joserfc==1.7.7
+    # via authlib
+numpy==2.2.6 ; python_full_version < '3.11'
+    # via tbrain
+numpy==2.4.6 ; python_full_version == '3.11.*'
+    # via tbrain
+numpy==2.5.4 ; python_full_version >= '3.12'
+    # via tbrain
+opentelemetry-api==1.45.1
+    # via fastapi
+protobuf==7.36.2
+    # via
+    #   tbrain
+    #   upstox-python-sdk
+pyarrow==25.0.1 ; python_full_version < '3.11'
+    # via tbrain
+pyarrow==26.0.0 ; python_full_version >= '3.11'
+    # via tbrain
+pycparser==3.11 ; python_full_version < '3.11' and implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+    # via cffi
+pycparser==3.12 ; python_full_version >= '3.11' and implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+    # via cffi
+pydantic==2.14.1
+    # via fastapi
+pydantic-core==2.50.1
+    # via pydantic
+pymongo==4.18.3 ; python_full_version < '3.11'
+    # via tbrain
+pymongo==4.19.0 ; python_full_version >= '3.11'
+    # via tbrain
+python-dateutil==2.9.0.post0
+    # via upstox-python-sdk
+six==1.17.0
+    # via
+    #   python-dateutil
+    #   upstox-python-sdk
+starlette==1.7.0 ; python_full_version < '3.11'
+    # via fastapi
+starlette==1.9.0 ; python_full_version >= '3.11'
+    # via fastapi
+typing-extensions==4.16.0
+    # via
+    #   anyio
+    #   cryptography
+    #   exceptiongroup
+    #   fastapi
+    #   opentelemetry-api
+    #   pydantic
+    #   pydantic-core
+    #   starlette
+    #   typing-inspection
+    #   uvicorn
+typing-inspection==0.4.4
+    # via
+    #   fastapi
+    #   pydantic
+upstox-python-sdk==2.30.0
+    # via tbrain
+urllib3==2.8.0
+    # via upstox-python-sdk
+uuid==1.30
+    # via upstox-python-sdk
+uvicorn==0.54.0
+    # via tbrain
+websocket-client==1.9.2
+    # via
+    #   tbrain
+    #   upstox-python-sdk

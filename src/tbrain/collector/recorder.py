@@ -33,7 +33,7 @@ RECENTER_CHECK_S = 10
 class Recorder:
     def __init__(self, s: Settings, token_provider: Callable[[], str], *, write: bool = True,
                  capture_raw: int = 0, n_strikes: int | None = None, n_expiries: int | None = None, log=print,
-                 ui_port: int | None = None, open_browser: bool = False):
+                 ui_port: int | None = None, open_browser: bool = False, publish=None, settings_store=None):
         self.s, self.log = s, log
         self.token_provider = token_provider
         self.n_strikes = s.n_strikes if n_strikes is None else n_strikes
@@ -54,6 +54,15 @@ class Recorder:
         self.ui_port, self.open_browser = ui_port, open_browser
         self.ui = None
         self.bc = None
+        self.publish = publish        # optional extra snapshot consumer (hosted app); must be cheap and never raise
+        self.sink = None              # MongoSink when MONGODB_URI is set
+        self.engine = None
+        if settings_store is None:
+            from tbrain.runtime_settings import FileSettings
+            settings_store = FileSettings(s.data_dir / "live" / "settings.json")
+        self.settings_store = settings_store  # dashboard switches (afternoon calls, drawdown stop)
+        self._last_settings = 0.0
+        self._last_daily = 0.0
         self.note = ""
         self.feed = LiveFeed(token_provider, self._on_msg, self._on_state, tls_verify=s.tls_verify, stale_s=s.stale_s)
 
@@ -170,10 +179,32 @@ class Recorder:
         if self.write:  # live recording only: probes / replays never issue calls
             from tbrain.signals.engine import EngineConfig, SignalEngine
             engine = SignalEngine(EngineConfig(min_score=self.s.signal_min_score, cost_per_lot_inr=self.s.cost_per_lot_inr,
-                                               risk_per_trade_inr=self.s.risk_per_trade_inr),
+                                               risk_per_trade_inr=self.s.risk_per_trade_inr, require_vwap=self.s.require_vwap,
+                                               trend_k=self.s.trend_k, loss_pause_n=self.s.loss_pause_n,
+                                               regime_gate=self.s.regime_gate, premium_stop=self.s.premium_stop,
+                                               fut_oi_fresh=self.s.fut_oi_fresh,
+                                               afternoon_cutoff=self.s.cutoff_time(), allow_afternoon=self.s.allow_afternoon,
+                                               dd_stop=self.s.dd_stop, dd_peak_r=self.s.dd_peak_r,
+                                               dd_giveback_r=self.s.dd_giveback_r),
                                   store_dir=self.s.data_dir / "signals", log=self.log)
+            self.engine = engine
+            self._apply_settings(force=True)
+            from tbrain.storage.mongo import open_sink
+            self.sink = open_sink(self.s, log=self.log)
+            if self.sink:
+                engine.on_event = self.sink.on_call_event
         self.brain = BrainState(contracts, self.index_keys, self.s.vix_key, self.s.risk_free,
                                 count_recorded_sessions(self.s.data_dir), engine=engine)
+        try:  # restart-safe: rebuild today's candles + VWAP from what was already recorded
+            from tbrain.collector.backfill import backfill_today
+            futs = {u: ins.nearest_future(contracts, u, today).instrument_key
+                    for u in self.index_keys if ins.nearest_future(contracts, u, today)}
+            keys = set(self.index_keys.values()) | set(futs.values())
+            if engine:
+                keys |= {c["instrument_key"] for c in engine.today_calls()}
+            backfill_today(self.brain, self.s.data_dir / "ticks", today.isoformat(), keys, futs, log=self.log)
+        except Exception as e:
+            self.log(f"[backfill] skipped: {e!r}")
         self._start_ui()
 
         if respect_hours:
@@ -257,7 +288,13 @@ class Recorder:
             if self.chain is not None:
                 self.chain.flush()
             self.write_live_state()
-        return self._manifest(started, contracts)
+        m = self._manifest(started, contracts)
+        if self.sink:
+            self._save_daily(force=True)
+            self.sink.on_session(m)
+            self.sink.close()
+            self.log(f"[mongo] {self.sink.stats()}")
+        return m
 
     def feed_info(self) -> dict:
         age = (time.time_ns() - self.feed.last_msg_ns) / 1e9 if self.feed.last_msg_ns else None
@@ -274,32 +311,63 @@ class Recorder:
 
     # ---- embedded UI (push) -------------------------------------------
     def _start_ui(self) -> None:
-        if not self.ui_port:
+        if self.ui_port:
+            from tbrain.ui.server import Broadcaster, UIServer
+            self.bc = Broadcaster()
+            try:
+                self.ui = UIServer(self.bc, self.ui_port, self.settings_store).start()
+            except OSError as e:
+                self.log(f"[ui] port {self.ui_port} busy ({e}); recording continues without the UI")
+                self.bc = None
+            else:
+                self.log(f"[ui] Brain UI live at {self.ui.url} (updates every {int(BRAIN_TICK_S*1000)} ms)")
+                if self.open_browser:
+                    import webbrowser
+                    webbrowser.open(self.ui.url)
+        # The brain loop also runs the signal engine, so it must run whenever we record - with or without a UI.
+        if self.bc is not None or self.write or self.publish is not None:
+            threading.Thread(target=self._brain_loop, daemon=True, name="brain-tick").start()
+
+    def _apply_settings(self, force: bool = False) -> None:
+        """Pick up dashboard switches (every 15 s). Never raises."""
+        if self.engine is None or (not force and time.monotonic() - self._last_settings < 15):
             return
-        from tbrain.ui.server import Broadcaster, UIServer
-        self.bc = Broadcaster()
+        self._last_settings = time.monotonic()
         try:
-            self.ui = UIServer(self.bc, self.ui_port).start()
-        except OSError as e:
-            self.log(f"[ui] port {self.ui_port} busy ({e}); recording continues without the UI")
-            self.bc = None
+            self.engine.apply_settings(self.settings_store.get())
+        except Exception as e:  # noqa: BLE001
+            self.log(f"[settings] {e!r}")
+
+    def _save_daily(self, force: bool = False, snap: dict | None = None) -> None:
+        if not self.sink or self.brain is None or (not force and time.monotonic() - self._last_daily < 60):
             return
-        self.log(f"[ui] Brain UI live at {self.ui.url} (updates every {int(BRAIN_TICK_S*1000)} ms)")
-        threading.Thread(target=self._brain_loop, daemon=True, name="brain-tick").start()
-        if self.open_browser:
-            import webbrowser
-            webbrowser.open(self.ui.url)
+        self._last_daily = time.monotonic()
+        try:
+            snap = snap or self.brain.snapshot(self.feed_info(), mode="live")
+            sig = snap.get("signals") or {}
+            if sig.get("today") is not None:
+                self.sink.on_daily(ist_date().isoformat(), sig.get("today") or {},
+                                   (sig.get("shadow") or {}).get("by_blocker") or {}, sig.get("rules"))
+        except Exception as e:  # noqa: BLE001
+            self.log(f"[mongo] daily summary skipped: {e!r}")
 
     def _brain_loop(self) -> None:
         last_file = 0.0
         nxt = time.monotonic()
         while not self._stop.is_set():
             try:
+                self._apply_settings()
                 info = self.feed_info()
                 if self.note:
                     info["note"] = self.note
                 snap = self.brain.snapshot(info, mode="live")
-                self.bc.publish(snap)
+                if self.bc is not None:
+                    self.bc.publish(snap)
+                if self.publish is not None:
+                    self.publish(snap)
+                if self.sink:
+                    self.sink.on_snapshot(snap)
+                    self._save_daily(snap=snap)
                 if time.monotonic() - last_file >= STATE_FILE_EVERY_S:
                     last_file = time.monotonic()
                     self.write_live_state(snap)
