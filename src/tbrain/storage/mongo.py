@@ -177,6 +177,7 @@ class MongoSink:
         self.errors = 0
         self._last_minute: dict[str, int] = {}
         self._last_err_log = 0.0
+        self._bulk_ok: bool | None = None   # None = untried; False = this backend's bulk_write is unusable
         self._stop = threading.Event()
         self._t = threading.Thread(target=self._run, daemon=True, name="mongo-sink")
         self._t.start()
@@ -255,16 +256,61 @@ class MongoSink:
                 pushes.setdefault(key, []).append(push)
         if not batch:
             return
-        # A few docs per second at most (features 2/min, daily 1/min, call events rare): plain upserts are
-        # far below Atlas free-tier limits (100 ops/s) and behave the same on every Mongo-compatible server.
+        upds: dict[str, dict] = {}
         for key, (coll, _id, doc) in batch.items():
             doc = {k: v for k, v in doc.items() if k != "_id"}
             upd = {"$set": doc}
             if key in pushes:
                 upd["$push"] = {"events": {"$each": [p["events"] for p in pushes[key]]}}
+            upds[key] = upd
+        if self._bulk_ok is not False:
+            try:
+                self._flush_bulk(batch, upds)
+                self._bulk_ok = True
+                return
+            except TypeError:  # the backend's bulk_write doesn't accept pymongo's current WriteModel shape
+                # (seen with mongomock lagging a pymongo release) - fall back for the rest of this sink's life.
+                self._bulk_ok = False
+        self._flush_per_doc(batch, upds)
+
+    def _flush_bulk(self, batch: dict, upds: dict) -> None:
+        from pymongo import UpdateOne
+        from pymongo.errors import BulkWriteError
+
+        by_coll: dict[str, list] = {}
+        for key, (coll, _id, doc) in batch.items():
+            by_coll.setdefault(coll, []).append((key, UpdateOne({"_id": _id}, upds[key], upsert=True)))
+        for coll, pairs in by_coll.items():
+            ops = [op for _, op in pairs]
             for attempt in range(3):
                 try:
-                    self.db[coll].update_one({"_id": _id}, upd, upsert=True)
+                    res = self.db[coll].bulk_write(ops, ordered=False)
+                    self.written += res.upserted_count + res.modified_count
+                    break
+                except BulkWriteError as e:  # noqa: BLE001 - unordered: successes stick, only failed ops retry
+                    failed_idx = {w["index"] for w in e.details.get("writeErrors", [])}
+                    self.written += len(ops) - len(failed_idx)
+                    ops = [op for i, op in enumerate(ops) if i in failed_idx]
+                    if attempt == 2 or not ops:
+                        self.dropped += len(ops)
+                        if ops:
+                            self._err(e)
+                        break
+                    time.sleep(1.5 * (attempt + 1))
+                except TypeError:
+                    raise  # let flush() fall back for the whole batch, not just this collection
+                except Exception as e:  # noqa: BLE001 - connection-level failure: whole batch retries
+                    if attempt == 2:
+                        self.dropped += len(ops)
+                        self._err(e)
+                    else:
+                        time.sleep(1.5 * (attempt + 1))
+
+    def _flush_per_doc(self, batch: dict, upds: dict) -> None:
+        for key, (coll, _id, doc) in batch.items():
+            for attempt in range(3):
+                try:
+                    self.db[coll].update_one({"_id": _id}, upds[key], upsert=True)
                     self.written += 1
                     break
                 except Exception as e:  # noqa: BLE001

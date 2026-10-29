@@ -33,6 +33,26 @@ def _wait(sink, cond, timeout=5):
     return False
 
 
+def test_sink_falls_back_to_per_doc_writes_when_bulk_write_is_unusable():
+    """mongomock can lag pymongo's WriteModel shape (seen with pymongo 4.19 / mongomock 4.3.0: a bare TypeError
+    from bulk_write). The sink must still get every write through via the per-doc fallback, and only pay the
+    detection cost once per sink instance."""
+    db = _db()
+    sink = M.MongoSink(db, owner="me", log=lambda *a: None, flush_s=100)
+    try:
+        sink.on_call_event("issue", {"id": "c1", "shadow": False, "issued_ms": 1000})
+        sink.flush()
+        assert db.calls.find_one({"_id": "c1"}) is not None
+        assert sink.written == 1 and sink.dropped == 0
+        # a second flush must not re-attempt bulk_write once it's known unusable for this backend
+        sink.on_call_event("issue", {"id": "c2", "shadow": False, "issued_ms": 2000})
+        sink.flush()
+        assert db.calls.find_one({"_id": "c2"}) is not None
+        assert sink.written == 2
+    finally:
+        sink.close(timeout=2)
+
+
 def test_clean_makes_documents_bson_safe():
     np = pytest.importorskip("numpy")
     d = M.clean({"a.b": 1, "$x": np.float64(2.5), "n": float("nan"), "i": math.inf, "l": (1, np.int64(3)), "o": object()})

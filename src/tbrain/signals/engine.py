@@ -555,7 +555,7 @@ class SignalEngine:
         for k, label in (("trend", "trend filter"), ("vwap", "VWAP filter"), ("cooldown", "cooldown"),
                          ("already open", "one open per index"), ("wall", "OI wall"), ("r:r", "R:R"), ("spread", "spread"),
                          ("thin offer", "depth"), ("regime", "regime gate"), ("paused", "loss pause"),
-                         ("shadow-only", "range-fade (shadow)"), ("premium levels", "levels"), ("stop too wide", "stop too wide"),
+                         ("shadow-only", "range-fade (shadow)"), ("levels", "levels"), ("stop too wide", "stop too wide"),
                          ("afternoon", "afternoon cutoff"), ("drawdown stop", "drawdown stop")):
             if k in t:
                 return label

@@ -211,6 +211,11 @@ def test_v2_premium_stop_fires_before_index_stop(tmp_path):
     assert eng2.calls[d["id"]]["status"] == "open"
 
 
+def test_blocker_key_catches_both_levels_messages():
+    assert SignalEngine.blocker_key("no levels") == "levels"
+    assert SignalEngine.blocker_key("premium levels not ordered after time decay (move too small)") == "levels"
+
+
 def test_v21_defaults_from_backtest():
     c = EngineConfig()
     assert c.require_vwap and c.trend_k == 1.5

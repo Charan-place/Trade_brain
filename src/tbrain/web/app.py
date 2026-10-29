@@ -382,9 +382,9 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
 
     @app.get("/upstox/callback")
     async def upstox_callback(request: Request):
-        u = user(request)
-        if not u or not is_owner(u):
-            return RedirectResponse("/", status_code=303)
+        u, err = _owner_redirect(request)
+        if err:
+            return err
         expected = request.session.pop("upstox_state", None)
         code, state = request.query_params.get("code"), request.query_params.get("state")
         if not code or not expected or not secrets.compare_digest(str(state), expected):
@@ -415,9 +415,9 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
 
     @app.get("/admin/access", response_class=HTMLResponse)
     async def admin_access(request: Request):
-        u = user(request)
-        if not u or not is_owner(u):
-            return RedirectResponse("/", status_code=303)
+        u, err = _owner_redirect(request)
+        if err:
+            return err
         if db is None:
             return PlainTextResponse("Server is missing MONGODB_URI.", status_code=500)
         tok = csrf_token(request)
@@ -441,9 +441,9 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
 
     @app.post("/admin/access/approve")
     async def admin_approve(request: Request, email: str = "", csrf: str = ""):
-        u = user(request)
-        if not u or not is_owner(u) or db is None or not csrf_ok(request, csrf):
-            return RedirectResponse("/", status_code=303)
+        u, err = _owner_redirect(request)
+        if err or db is None or not csrf_ok(request, csrf):
+            return err or RedirectResponse("/", status_code=303)
         email = email.lower()
         if email:
             db.access.update_one({"_id": email}, {"$set": {"status": "approved"}}, upsert=True)
@@ -451,9 +451,9 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
 
     @app.post("/admin/access/deny")
     async def admin_deny(request: Request, email: str = "", csrf: str = ""):
-        u = user(request)
-        if not u or not is_owner(u) or db is None or not csrf_ok(request, csrf):
-            return RedirectResponse("/", status_code=303)
+        u, err = _owner_redirect(request)
+        if err or db is None or not csrf_ok(request, csrf):
+            return err or RedirectResponse("/", status_code=303)
         email = email.lower()
         if email:
             db.access.update_one({"_id": email}, {"$set": {"status": "denied"}}, upsert=True)
@@ -481,6 +481,14 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": f"history unavailable: {type(e).__name__}"}, status_code=503)
         return JSONResponse(h, headers={"Cache-Control": "no-store"})
+
+    def _owner_redirect(request: Request):
+        """Shared owner-only gate for HTML/redirect routes (JSON API routes use _owner_json below).
+        Returns (user, None) on success, or (None, a RedirectResponse the caller must return) on failure."""
+        u = user(request)
+        if not u or not is_owner(u):
+            return None, RedirectResponse("/", status_code=303)
+        return u, None
 
     # ---------------- real money (OWNER ONLY). Every other account sees signals only.
     def _owner_json(request: Request):
