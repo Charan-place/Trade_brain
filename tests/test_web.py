@@ -116,15 +116,32 @@ def test_admin_access_page_is_owner_only_and_lists_requests():
     assert c2.get("/admin/access", follow_redirects=False).status_code == 303   # not the owner
 
 
+def _csrf(c):
+    import re
+    m = re.search(r'name="csrf" value="([^"]+)"', c.get("/admin/access").text)
+    return m.group(1)
+
+
 def test_admin_can_approve_and_deny_via_query_param_post():
     c, s, db, *_ = _client()
     c.get("/login")
     db.access.insert_one({"_id": "y@gmail.com", "name": "Y", "status": "pending"})
-    r = c.post("/admin/access/approve?email=y@gmail.com", follow_redirects=False)
+    tok = _csrf(c)
+    r = c.post(f"/admin/access/approve?email=y@gmail.com&csrf={tok}", follow_redirects=False)
     assert r.status_code == 303
     assert db.access.find_one({"_id": "y@gmail.com"})["status"] == "approved"
-    c.post("/admin/access/deny?email=y@gmail.com")
+    c.post(f"/admin/access/deny?email=y@gmail.com&csrf={tok}")
     assert db.access.find_one({"_id": "y@gmail.com"})["status"] == "denied"
+
+
+def test_admin_approve_without_a_valid_csrf_token_is_refused():
+    c, s, db, *_ = _client()
+    c.get("/login")
+    db.access.insert_one({"_id": "z@gmail.com", "name": "Z", "status": "pending"})
+    c.get("/admin/access")  # mint a session csrf token, but don't use it
+    r = c.post("/admin/access/approve?email=z@gmail.com&csrf=forged-token", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    assert db.access.find_one({"_id": "z@gmail.com"})["status"] == "pending"   # unchanged
 
 
 def test_star_allows_any_verified_google_account_but_not_upstox_connect():

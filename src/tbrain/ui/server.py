@@ -76,7 +76,75 @@ def current_state(s: Settings, force_demo: bool = False) -> dict:
             "signals": {"status": "observing", "calls": [], "reason": "No data yet", "scoreboard": {"calls": 0}}}
 
 
-def make_handler(bc: Broadcaster, settings_store=None):
+def offline_real_status(s, store) -> dict:
+    """Real-money card data when the brain is not running (weekend, before 09:00): switch, cap, Groww connection."""
+    from tbrain.execution.hub import CONFIRM_PHRASE
+    r = store.get_real() if store else {}
+    st = {"on": bool(r.get("on")), "why_off": r.get("why_off"), "connected": False, "broker": None, "configured": False,
+          "loss_cap": float(r.get("loss_cap") or s.real_daily_loss_cap), "loss_cap_max": float(s.real_loss_cap_max),
+          "pnl_today": 0.0, "confirm_each": bool(s.real_confirm_each), "lots": s.real_lots, "max_open": s.real_max_open,
+          "confirm_phrase": CONFIRM_PHRASE, "brain_running": False, "note": None}
+    try:
+        rb = s.order_broker(timeout=3.0)
+    except Exception as e:  # noqa: BLE001
+        rb, st["note"] = None, f"order server settings are invalid: {e}"[:200]
+    if rb is None:
+        st["note"] = st["note"] or "order server is not set up yet (TBRAIN_ORDER_SERVER_URL / _TOKEN)"
+        return st
+    st["configured"], st["broker"] = True, "groww"
+    try:
+        st["connected"] = bool(rb._call("GET", "/status").get("connected"))  # direct call: keep the error text
+    except Exception as e:  # noqa: BLE001
+        st["note"] = f"order server not reachable: {e}"[:200]
+    return st
+
+
+def real_action(store, path: str, body: dict, max_cap: float) -> tuple[int, dict]:
+    """Owner-only real-money actions, shared by the local server (the web app has its own auth around the same rules)."""
+    from tbrain.execution.hub import CONFIRM_PHRASE
+    if path == "/api/real":
+        if "loss_cap" in body:
+            try:
+                cap = float(body["loss_cap"])
+            except (TypeError, ValueError):
+                return 400, {"error": "loss cap must be a number"}
+            if not (0 < cap <= max_cap):
+                return 400, {"error": f"loss cap must be between 1 and {max_cap:,.0f}"}
+            store.set_real(loss_cap=cap)
+        if "on" in body:
+            if body["on"] is True:
+                if str(body.get("confirm", "")).strip().lower() != CONFIRM_PHRASE:
+                    return 400, {"error": f"type exactly: {CONFIRM_PHRASE}"}
+                store.set_real(on=True, why_off=None)
+            elif body["on"] is False:
+                store.set_real(on=False, why_off="switched off by you")
+            else:
+                return 400, {"error": "on must be true or false"}
+        return 200, {"real": store.get_real()}
+    if path == "/api/real/exit":
+        if body.get("all") is True:
+            return 200, {"queued": store.push_command("exit_all")}
+        if isinstance(body.get("call_id"), str) and body["call_id"]:
+            return 200, {"queued": store.push_command("exit", body["call_id"])}
+        return 400, {"error": "send {call_id} or {all: true}"}
+    if path == "/api/real/connect":
+        from tbrain.config import Settings
+        rb = Settings.load().order_broker()
+        if rb is None:
+            return 400, {"error": "order server is not set up yet (TBRAIN_ORDER_SERVER_URL / _TOKEN)"}
+        try:
+            r = rb.connect()
+        except Exception as e:  # noqa: BLE001
+            return 502, {"error": str(e)[:300]}
+        return 200, {"connected": bool(r.get("connected"))}
+    if path == "/api/real/approve":
+        if isinstance(body.get("call_id"), str) and body["call_id"]:
+            return 200, {"queued": store.push_command("approve", body["call_id"])}
+        return 400, {"error": "send {call_id}"}
+    return 404, {"error": "not found"}
+
+
+def make_handler(bc: Broadcaster, settings_store=None, history=None, max_cap: float = 10000.0):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -123,6 +191,21 @@ def make_handler(bc: Broadcaster, settings_store=None):
             elif path == "/api/stream":
                 self.close_connection = True
                 self._stream()
+            elif path == "/api/history":
+                from urllib.parse import parse_qs, urlparse
+                book = (parse_qs(urlparse(self.path).query).get("book") or ["signal"])[0]
+                try:
+                    if book not in ("signal", "paper", "real"):
+                        raise ValueError("book must be signal, paper or real")
+                    body = json.dumps(history(book) if history else {"days": [], "total": {}}, default=str).encode()
+                    self._send(200, body, "application/json")
+                except Exception as e:  # noqa: BLE001
+                    self._send(503, json.dumps({"error": repr(e)}).encode(), "application/json")
+            elif path == "/api/real":
+                from tbrain.config import Settings
+                body = json.dumps({"real": settings_store.get_real() if settings_store else {},
+                                   "status": offline_real_status(Settings.load(), settings_store)}).encode()
+                self._send(200, body, "application/json")
             elif path == "/api/settings":
                 body = json.dumps({"settings": settings_store.get() if settings_store else {},
                                    "can_edit": settings_store is not None}).encode()
@@ -136,7 +219,8 @@ def make_handler(bc: Broadcaster, settings_store=None):
             path = self.path.split("?", 1)[0]
             origin = self.headers.get("Origin")
             host = self.headers.get("Host", "")
-            if path != "/api/settings" or settings_store is None:
+            if path not in ("/api/settings", "/api/real", "/api/real/exit", "/api/real/approve",
+                            "/api/real/connect") or settings_store is None:
                 self._send(404, b"not found", "text/plain"); return
             if "application/json" not in (self.headers.get("Content-Type") or ""):
                 self._send(415, b"json only", "text/plain"); return
@@ -144,11 +228,16 @@ def make_handler(bc: Broadcaster, settings_store=None):
                 self._send(403, b"bad origin", "text/plain"); return
             try:
                 n = min(int(self.headers.get("Content-Length") or 0), 4096)
-                changes = json.loads(self.rfile.read(n) or b"{}")
-                cur = settings_store.update(changes if isinstance(changes, dict) else {})
+                body = json.loads(self.rfile.read(n) or b"{}")
+                if not isinstance(body, dict):
+                    raise ValueError("bad json")
             except (ValueError, OSError):
                 self._send(400, b"bad request", "text/plain"); return
-            self._send(200, json.dumps({"settings": cur, "can_edit": True}).encode(), "application/json")
+            if path == "/api/settings":
+                cur = settings_store.update(body)
+                self._send(200, json.dumps({"settings": cur, "can_edit": True}).encode(), "application/json"); return
+            code, out = real_action(settings_store, path, body, max_cap)
+            self._send(code, json.dumps(out).encode(), "application/json")
 
         def log_message(self, *a):
             pass
@@ -165,9 +254,9 @@ class _QuietServer(ThreadingHTTPServer):
 
 
 class UIServer:
-    def __init__(self, bc: Broadcaster, port: int = 8765, settings_store=None):
+    def __init__(self, bc: Broadcaster, port: int = 8765, settings_store=None, history=None, max_cap: float = 10000.0):
         self.bc, self.port = bc, port
-        self.srv = _QuietServer(("127.0.0.1", port), make_handler(bc, settings_store))
+        self.srv = _QuietServer(("127.0.0.1", port), make_handler(bc, settings_store, history, max_cap))
         self.srv.daemon_threads = True
         self.url = f"http://127.0.0.1:{port}/"
         self._t: threading.Thread | None = None
@@ -190,7 +279,10 @@ def serve(s: Settings, port: int = 8765, force_demo: bool = False, open_browser:
     provider = provider or (lambda: current_state(s, force_demo))
     try:
         from tbrain.runtime_settings import FileSettings
-        ui = UIServer(bc, port, FileSettings(s.data_dir / "live" / "settings.json")).start()
+        from tbrain.history import from_exec_files, from_files
+        ui = UIServer(bc, port, FileSettings(s.data_dir / "live" / "settings.json"),
+                      history=lambda book="signal": from_files(s.data_dir) if book == "signal" else from_exec_files(s.data_dir, book),
+                      max_cap=s.real_loss_cap_max).start()
     except OSError as e:
         print(f"Port {port} busy ({e}). If `tbrain record` is running, its UI is already at http://127.0.0.1:{port}/")
         return

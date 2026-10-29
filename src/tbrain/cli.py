@@ -1,4 +1,4 @@
-"""tbrain CLI:  login | check | instruments | probe | record | report | review | backtest | ui | mongo | web"""
+"""tbrain CLI:  login | check | instruments | probe | record | report | review | backtest | ui | mongo | web | orderserver"""
 from __future__ import annotations
 
 import argparse
@@ -62,6 +62,12 @@ def cmd_web(s: Settings, a) -> int:
     from tbrain.web.app import create_app
     uvicorn.run(create_app(s), host=a.host, port=a.port, log_level="warning")
     return 0
+
+
+def cmd_orderserver(s: Settings, a) -> int:
+    """Static-IP VM only: Groww order server (needs `pip install growwapi` there)."""
+    from tbrain.orderserver.main import serve
+    return serve(a.host, a.port, a.cert, a.key)
 
 
 def cmd_instruments(s: Settings, a) -> int:
@@ -187,12 +193,17 @@ def main(argv: list[str] | None = None) -> int:
     x = sub.add_parser("web", help="hosted-style web app (Google sign-in, Upstox connect, live dashboard)")
     x.add_argument("--host", default="127.0.0.1")
     x.add_argument("--port", type=int, default=8765)
+    x = sub.add_parser("orderserver", help="Groww order server for the static-IP VM (HTTPS, signed requests only)")
+    x.add_argument("--host", default="0.0.0.0")
+    x.add_argument("--port", type=int, default=443)
+    x.add_argument("--cert", required=True, help="TLS certificate (PEM)")
+    x.add_argument("--key", required=True, help="TLS private key (PEM)")
     a = p.parse_args(argv)
     s = Settings.load()
     try:
         return {"login": cmd_login, "check": cmd_check, "instruments": cmd_instruments, "probe": cmd_probe,
                 "record": cmd_record, "report": cmd_report, "ui": cmd_ui, "review": cmd_review, "backtest": cmd_backtest,
-                "mongo": cmd_mongo, "web": cmd_web}[a.cmd](s, a)
+                "mongo": cmd_mongo, "web": cmd_web, "orderserver": cmd_orderserver}[a.cmd](s, a)
     except Exception as e:  # concise errors; no secrets are ever in messages
         print(f"error: {e}", file=sys.stderr)
         return 1

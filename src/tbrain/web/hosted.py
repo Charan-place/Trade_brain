@@ -29,14 +29,14 @@ def run_hosted_day(s, state_dict, log=print, recorder_cls=None, tokens=None, now
         from tbrain.storage.mongo import connect
         from tbrain.web.tokens import TokenStore
         tokens = TokenStore(connect(s.mongodb_uri, s.mongodb_db), s.encryption_key)
-    if not tokens.load(s.owner_email):
+    if not tokens.load(s.owner_email, now=now):
         log("[hosted] Upstox is not connected today - open the app and click 'Connect Upstox'")
         return "no-token"
     from tbrain.web.state import make_dict_publisher
     if recorder_cls is None:
         from tbrain.collector.recorder import Recorder as recorder_cls
     from tbrain.runtime_settings import DictSettings
-    r = recorder_cls(s, lambda: tokens.load(s.owner_email) or "", write=True, ui_port=None,
+    r = recorder_cls(s, lambda: tokens.load(s.owner_email, now=now) or "", write=True, ui_port=None,
                      publish=make_dict_publisher(state_dict, log=log), log=log, settings_store=DictSettings(state_dict))
     r.run()
     return "done"

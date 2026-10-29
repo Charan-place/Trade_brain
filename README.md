@@ -24,6 +24,7 @@ calls** (option, expiry, entry, stop loss, targets, reasons) that it then tracks
 11. [Roadmap](#11-roadmap)
 12. [MongoDB (training data)](#12-mongodb-training-data)
 13. [Deploy on Modal (hosted, Google sign-in)](#13-deploy-on-modal-hosted-google-sign-in)
+14. [Paper and real trading (Groww, owner only)](#14-paper-and-real-trading-groww-owner-only)
 
 ---
 
@@ -216,6 +217,11 @@ The brain only suggests. If **you** choose to act on a call:
 | `TBRAIN_OWNER_EMAIL` | first allowed email | Hosted app: the account whose Upstox login feeds the brain |
 | `TBRAIN_SESSION_SECRET`, `TBRAIN_ENCRYPTION_KEY` | — | Hosted app: cookie signing key; Fernet key that encrypts Upstox tokens in MongoDB |
 | `TBRAIN_PUBLIC_URL` | — | Hosted app: its https address (used for redirects and secure cookies) |
+| `TBRAIN_REAL_DAILY_LOSS_CAP` / `_MAX` | `3000` / `10000` | Real money: daily loss cap (editable on the dashboard, never above the max) |
+| `TBRAIN_REAL_LOTS`, `TBRAIN_REAL_MAX_OPEN`, `TBRAIN_REAL_MAX_ORDERS` | `1`, `2`, `20` | Real money: lots per call, open trades, orders per day |
+| `TBRAIN_REAL_CONFIRM_EACH` | `1` | Real money: each entry waits for your *Approve* click |
+| `TBRAIN_REAL_MAX_PRICE_GAP_PCT`, `TBRAIN_REAL_SAFETY_STOP_R`, `TBRAIN_REAL_ENTRY_TIMEOUT_S` | `1.0`, `2.0`, `20` | Real money: Groww vs Upstox price check, resting stop, entry wait |
+| `TBRAIN_ORDER_SERVER_URL`, `_TOKEN`, `_CERT` | — | Real money: the static-IP order server (section 14) |
 
 ---
 
@@ -367,6 +373,52 @@ Notes: Modal may occasionally restart a container; the brain rebuilds today's ch
 open calls (about a minute lost). Modal's free plan keeps logs for 1 day — MongoDB keeps the history.
 Opening the app to the public (each user with their own Upstox) is a separate step: check SEBI rules on research
 recommendations and Upstox's API terms first.
+
+---
+
+## 14. Paper and real trading (Groww, owner only)
+
+Only the owner (`TBRAIN_OWNER_EMAIL`) sees the Paper and Real columns, the Real money card and their history.
+Everyone else sees the brain and its calls only.
+
+**Three books per call.** *Signal* is the engine's call. *Paper* fills at the live bid/ask and always runs, whatever
+you do with real trades. *Real* places orders on your Groww account through the order server.
+
+**A real entry happens only when all of these hold:** the switch is on (typed phrase `yes use my real money`),
+Groww is connected today, it is before 15:15, the daily loss cap is not hit, the contract maps exactly
+(token, strike, expiry, CE/PE, lot), Groww's ask is within 1% of Upstox's, and the margin covers the order.
+Otherwise the real leg is skipped with a reason; paper goes on.
+
+**Orders.** Entry is a LIMIT at `min(ask, zone top)` (never chases; missed after 20 s). A safety SL-M rests at −2R on the
+premium (−1R after T1). Exits follow the signal: cancel the stop, then sell at MARKET, never more than you hold.
+15:20 squares off everything. Positions are checked against Groww every 5 s; two mismatches in a row turn real off.
+
+**Turning off** is one click: open real trades are sold at the current price, then Groww is disconnected until you
+connect again. Hitting the loss cap does the same automatically. *Exit* / *Exit all* buttons close real trades early.
+
+### Why a separate VM
+SEBI's retail-algo rules (from 1 Apr 2026) need orders to come from a **static IP whitelisted with the broker**.
+Modal's IPs change, so a small VM with a fixed IP places the orders; Modal still runs the brain and the website.
+
+### One-time setup
+1. **VM**: AWS Lightsail → Mumbai → Ubuntu 24.04 → $7 plan. Networking → attach a **static IP**; firewall → add TCP 8443.
+2. **Groww**: subscribe to the Trading API, create an API key + secret, add the VM's static IP to the key.
+3. On the VM: `git clone <repo> ~/trade_brain_algorithm && cd ~/trade_brain_algorithm && bash deploy/orderserver_setup.sh <STATIC_IP>`
+4. `nano ~/tbrain-orderserver/.env` → fill `GROWW_API_KEY`, `GROWW_API_SECRET` (the token is generated for you), then
+   `sudo systemctl restart tbrain-orderserver`.
+5. Add `TBRAIN_ORDER_SERVER_URL`, `TBRAIN_ORDER_SERVER_TOKEN`, `TBRAIN_ORDER_SERVER_CERT` (printed by the script) to the
+   Modal secret `tbrain-secrets`, then `modal deploy deploy/modal_app.py`.
+
+Groww keys live only on the VM. Every request from Modal is HMAC-signed (30 s window, no replays) over TLS pinned to
+the VM's own certificate.
+
+### Daily use
+1. Approve today's access on Groww's **API Keys** page.
+2. Dashboard → Real money card → **Connect Groww**.
+3. Type `yes use my real money` → **Turn on**. Adjust the loss cap if you like.
+4. With *confirm each* on, press **Approve** on each real entry within 45 s.
+
+Suggested rollout: two weeks of paper only → real at 1 lot with confirm-each → automatic.
 
 ---
 

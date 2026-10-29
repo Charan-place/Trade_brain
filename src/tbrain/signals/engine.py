@@ -67,6 +67,7 @@ class EngineConfig:
     dd_stop: bool = True              # stop new calls once today's realized R falls dd_giveback_r from a peak >= dd_peak_r
     dd_peak_r: float = 2.0
     dd_giveback_r: float = 2.0
+    correlation_block: bool = False   # block (not just flag) a same-direction call when the other index already has one open
     # ---- shadows ----
     shadows: bool = True
     range_fade_shadow: bool = True
@@ -116,6 +117,7 @@ class SignalEngine:
         self._issued_bar: dict[str, int] = {}
         self._shadow_bar: dict[tuple, int] = {}
         self.on_event = None  # optional hook (event, call) -> None, e.g. MongoSink.on_call_event; must not raise
+        self.on_step = None   # optional hook (now_ms, ctxs) -> None, e.g. ExecutionHub.on_step
         self._load()
 
     # ------------------------------------------------------------ persistence
@@ -154,6 +156,11 @@ class SignalEngine:
 
     # ------------------------------------------------------------ main step
     def step(self, now_ms: float, ctxs: dict[str, dict], tracker) -> dict:
+        if self.on_step is not None:     # execution (paper/real books) sees the same quotes first
+            try:
+                self.on_step(now_ms, ctxs)
+            except Exception as e:  # noqa: BLE001 - execution problems must never stop signals
+                self.log(f"[exec] step failed: {e!r}")
         for book in (self.calls, self.shadows):
             for c in list(book.values()):
                 if c["status"] in ("open", "t1"):
@@ -425,6 +432,8 @@ class SignalEngine:
                 break
         correlated = [c["symbol"] for c in self.calls.values()
                       if c["und"] != und and c["status"] in ("open", "t1") and c["dir"] == d]
+        if enforce and cfg.correlation_block and correlated:
+            return None, f"same-direction call already open on {correlated[0]} (correlation block)"
         return {
             "id": uuid.uuid4().hex[:10], "und": und, "dir": d, "direction": "bullish" if d > 0 else "bearish",
             "action": f"BUY {kind}", "instrument_key": leg["key"], "kind": kind, "strike": K, "expiry": ch.get("expiry"),
@@ -546,7 +555,7 @@ class SignalEngine:
         for k, label in (("trend", "trend filter"), ("vwap", "VWAP filter"), ("cooldown", "cooldown"),
                          ("already open", "one open per index"), ("wall", "OI wall"), ("r:r", "R:R"), ("spread", "spread"),
                          ("thin offer", "depth"), ("regime", "regime gate"), ("paused", "loss pause"),
-                         ("shadow-only", "range-fade (shadow)"), ("premium levels", "levels"), ("stop too wide", "stop too wide"),
+                         ("shadow-only", "range-fade (shadow)"), ("levels", "levels"), ("stop too wide", "stop too wide"),
                          ("afternoon", "afternoon cutoff"), ("drawdown stop", "drawdown stop")):
             if k in t:
                 return label
