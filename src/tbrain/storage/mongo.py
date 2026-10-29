@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 from tbrain.timeutil import IST
 
-COLLECTIONS = ("calls", "shadows", "features", "sessions", "daily", "users", "upstox_tokens")
+COLLECTIONS = ("calls", "shadows", "features", "sessions", "daily", "users", "upstox_tokens", "exec_trades")
 
 
 def clean(x):
@@ -194,6 +194,15 @@ class MongoSink:
             self._put(coll, call["id"], call_doc(call, self.owner),
                       {"events": {"event": event, "at": datetime.now(timezone.utc)}})
         except Exception as e:  # noqa: BLE001 - storage must never break the brain
+            self._err(e)
+
+    def on_exec_event(self, book: str, event: str, trade: dict) -> None:
+        """Paper/real trade lifecycle -> `exec_trades` (one doc per book+call, with its event history)."""
+        try:
+            d = clean({k: val for k, val in trade.items() if k != "events"})
+            d.update(owner=self.owner, day=day_of_ms(trade.get("created_ms")), updated_at=datetime.now(timezone.utc))
+            self._put("exec_trades", trade["id"], d, {"events": {"event": event, "at": datetime.now(timezone.utc)}})
+        except Exception as e:  # noqa: BLE001
             self._err(e)
 
     def on_snapshot(self, snap: dict) -> None:

@@ -33,7 +33,8 @@ RECENTER_CHECK_S = 10
 class Recorder:
     def __init__(self, s: Settings, token_provider: Callable[[], str], *, write: bool = True,
                  capture_raw: int = 0, n_strikes: int | None = None, n_expiries: int | None = None, log=print,
-                 ui_port: int | None = None, open_browser: bool = False, publish=None, settings_store=None):
+                 ui_port: int | None = None, open_browser: bool = False, publish=None, settings_store=None,
+                 real_broker=None):
         self.s, self.log = s, log
         self.token_provider = token_provider
         self.n_strikes = s.n_strikes if n_strikes is None else n_strikes
@@ -57,6 +58,8 @@ class Recorder:
         self.publish = publish        # optional extra snapshot consumer (hosted app); must be cheap and never raise
         self.sink = None              # MongoSink when MONGODB_URI is set
         self.engine = None
+        self.hub = None
+        self.real_broker = real_broker   # None until a broker is connected (Phase 2): real leg is then "skipped"
         if settings_store is None:
             from tbrain.runtime_settings import FileSettings
             settings_store = FileSettings(s.data_dir / "live" / "settings.json")
@@ -191,8 +194,23 @@ class Recorder:
             self._apply_settings(force=True)
             from tbrain.storage.mongo import open_sink
             self.sink = open_sink(self.s, log=self.log)
-            if self.sink:
-                engine.on_event = self.sink.on_call_event
+            from tbrain.execution.hub import ExecutionHub
+            if self.real_broker is None:
+                try:
+                    self.real_broker = self.s.order_broker()
+                except Exception as e:  # noqa: BLE001 - real money is optional; paper and signals go on
+                    self.log(f"[real] order server not usable: {e!r}")
+            self.hub = ExecutionHub(self.s, self.settings_store, log=self.log, real_broker=self.real_broker,
+                                    store_dir=self.s.data_dir / "exec",
+                                    on_event=(self.sink.on_exec_event if self.sink else None))
+            sink, hub = self.sink, self.hub
+
+            def on_event(event, call):
+                if sink:
+                    sink.on_call_event(event, call)
+                hub.on_event(event, call)
+            engine.on_event = on_event
+            engine.on_step = hub.on_step
         self.brain = BrainState(contracts, self.index_keys, self.s.vix_key, self.s.risk_free,
                                 count_recorded_sessions(self.s.data_dir), engine=engine)
         try:  # restart-safe: rebuild today's candles + VWAP from what was already recorded
@@ -315,9 +333,11 @@ class Recorder:
             from tbrain.ui.server import Broadcaster, UIServer
             self.bc = Broadcaster()
             try:
-                from tbrain.history import from_files
+                from tbrain.history import from_exec_files, from_files
+                dd = self.s.data_dir
                 self.ui = UIServer(self.bc, self.ui_port, self.settings_store,
-                                   history=lambda: from_files(self.s.data_dir)).start()
+                                   history=lambda book="signal": from_files(dd) if book == "signal" else from_exec_files(dd, book),
+                                   max_cap=self.s.real_loss_cap_max).start()
             except OSError as e:
                 self.log(f"[ui] port {self.ui_port} busy ({e}); recording continues without the UI")
                 self.bc = None
@@ -363,6 +383,8 @@ class Recorder:
                 if self.note:
                     info["note"] = self.note
                 snap = self.brain.snapshot(info, mode="live")
+                if self.hub is not None:
+                    snap["execution"] = self.hub.snapshot()   # owner-only: stripped for other users by the web app
                 if self.bc is not None:
                     self.bc.publish(snap)
                 if self.publish is not None:

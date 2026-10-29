@@ -10,15 +10,17 @@ class CandleBook:
         self._bars: dict[str, dict[int, list[float]]] = {}
 
     def update(self, key: str, ts_ms: int, price: float, dv: float = 0.0) -> None:
+        # A new key is only ever inserted when its minute is >= every minute already in `book` (see the guard
+        # below), so `book`'s insertion order is always chronological - no sort needed to evict or read it back.
         m = int(ts_ms) - int(ts_ms) % MIN_MS
         book = self._bars.setdefault(key, {})
         b = book.get(m)
         if b is None:
-            if book and m < max(book):  # late/out-of-order print for an old minute: fold into that minute if kept
+            if book and m < next(reversed(book)):  # late/out-of-order print for an old minute: fold in if kept
                 return
             book[m] = [price, price, price, price, float(dv)]
             if len(book) > self.max_bars:
-                for old in sorted(book)[: len(book) - self.max_bars]:
+                for old in list(book)[: len(book) - self.max_bars]:
                     del book[old]
         else:
             b[1] = max(b[1], price)
@@ -28,7 +30,7 @@ class CandleBook:
 
     def series(self, key: str, n: int = 150) -> list[list[float]]:
         book = self._bars.get(key) or {}
-        return [[m, *book[m]] for m in sorted(book)[-n:]]
+        return [[m, *book[m]] for m in list(book)[-n:]]
 
     def completed(self, key: str, now_ms: int, n: int = 60) -> list[list[float]]:
         cur = int(now_ms) - int(now_ms) % MIN_MS

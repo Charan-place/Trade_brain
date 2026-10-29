@@ -77,3 +77,46 @@ def from_mongo(db, owner: str | None, days: int = 60) -> dict:
     proj = {k: 1 for k in FIELDS + ("regime", "day")}
     calls = list(db.calls.find(q, proj).sort("issued_ms", -1).limit(5000))
     return summarize(calls, days)
+
+
+# ---------------------------------------------------------------- paper / real books (owner only)
+def exec_compact(t: dict) -> dict | None:
+    """A paper/real trade in the same shape as a call, so the dashboard table can show it."""
+    if not t.get("filled_qty"):
+        return None                                   # skipped / missed: never held a position
+    entry, exit_ = t.get("entry_price"), t.get("exit_price")
+    lots = t.get("lots") or 1
+    risk = (entry - t["p_sl"]) if entry and t.get("p_sl") else None
+    r = ((exit_ - entry) / risk) if (risk and exit_ is not None and risk > 0) else None
+    closed = t.get("state") == "closed"
+    return {"id": t.get("call_id"), "und": t.get("und"), "symbol": t.get("symbol"), "dir": t.get("dir"),
+            "issued_ms": t.get("created_ms"), "exit_ms": t.get("closed_ms"), "entry": entry, "exit": exit_,
+            "status": "closed" if closed else "open", "outcome": (t.get("exit_reason") or t.get("state") or "")[:18],
+            "r_now": round(r, 2) if r is not None else None,
+            "pnl_per_lot": round(t["pnl"] / lots, 2) if t.get("pnl") is not None else None,
+            "lot": t.get("lot_size"), "regime": None}
+
+
+def summarize_exec(trades: list[dict], days: int = 60) -> dict:
+    rows = [x for x in (exec_compact(t) for t in trades) if x]
+    out = summarize(rows, days)
+    out["skipped"] = sum(1 for t in trades if not t.get("filled_qty"))
+    return out
+
+
+def from_exec_files(data_dir: Path, book: str, days: int = 60) -> dict:
+    p = Path(data_dir) / "exec" / f"{book}.jsonl"
+    last: dict[str, dict] = {}
+    if p.exists():
+        for line in p.read_text().splitlines():
+            try:
+                tr = json.loads(line)["trade"]
+                last[tr["id"]] = tr
+            except (json.JSONDecodeError, KeyError):
+                continue
+    return summarize_exec(list(last.values()), days)
+
+
+def from_mongo_exec(db, owner: str | None, book: str, days: int = 60) -> dict:
+    q = {"book": book, **({"owner": owner} if owner else {})}
+    return summarize_exec(list(db.exec_trades.find(q).sort("created_ms", -1).limit(5000)), days)

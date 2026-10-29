@@ -166,6 +166,17 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
 .calls tbody tr:hover td{background:var(--surface-2)}
 .calls tr.sel td{background:var(--call-wash)}
 .pos{color:var(--good-ink);font-weight:600} .neg{color:var(--crit);font-weight:600}
+#realBody{display:flex;flex-wrap:wrap;gap:12px 22px;align-items:center;font-size:13px}
+#realBody .stat b{font-size:16px} #realBody .stat{display:flex;flex-direction:column;gap:2px;min-width:120px}
+#realBody .stat span{color:var(--muted);font-size:12px}
+#realBody input{font:inherit;background:var(--surface-2);color:var(--ink);border:0;box-shadow:0 0 0 1px var(--ring);border-radius:8px;padding:6px 9px}
+.rbtn{border:0;border-radius:8px;padding:7px 12px;font:inherit;font-weight:600;cursor:pointer;background:var(--surface-2);color:var(--ink);box-shadow:0 0 0 1px var(--ring)}
+.rbtn.go{background:var(--brain);color:#fff;box-shadow:none} .rbtn.stop{background:var(--crit);color:#fff;box-shadow:none}
+.rbtn:disabled{opacity:.45;cursor:not-allowed}
+.xbtn{border:0;border-radius:6px;padding:2px 8px;font:inherit;font-size:11px;font-weight:600;cursor:pointer;background:var(--crit);color:#fff;margin-left:6px}
+.xbtn.ok{background:var(--brain)}
+.bookcell{font-size:11.5px;white-space:nowrap} .bookcell .st{color:var(--muted)}
+#histBooks{display:flex;gap:6px;margin:8px 0 2px}
 #histTbl tr.day td{font-weight:600} #histTbl tr.day td:first-child::before{content:"▸ ";color:var(--muted)}
 #histTbl tr.day.open td:first-child::before{content:"▾ "} #histTbl tr.trade td{font-size:12px;background:var(--surface-2)}
 #histTbl tr.trade{cursor:default} #histTbl tr.trade:hover td{background:var(--surface-2)}
@@ -206,6 +217,13 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
   </header>
 
   <section class="grid tiles" id="tiles"></section>
+
+  <section class="grid" id="realWrap" style="display:none;grid-template-columns:minmax(0,1fr);margin-bottom:14px">
+    <div class="card" id="realCard">
+      <h2 data-tip="info" data-info="Real money|Only you see this. Paper trading always runs; real orders go to your broker only when this is on, the broker is connected, funds are enough and every safety check passes.">Real money</h2>
+      <div id="realBody"></div>
+    </div>
+  </section>
 
   <section class="grid row-chart">
     <div class="card">
@@ -291,6 +309,10 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     <div class="card" id="history">
       <h2>Trade history · every day's calls</h2>
       <div id="histTotal" style="font-size:13px;color:var(--ink-2);margin-top:2px">Loading…</div>
+      <div id="histBooks" style="display:none" role="tablist" aria-label="Book">
+        <button class="tf" data-book="signal" aria-pressed="true" data-tip="info" data-info="Signal|The brain's calls, scored at the option bid.">Signal</button>
+        <button class="tf" data-book="paper" aria-pressed="false" data-tip="info" data-info="Paper|Simulated orders at live bid/ask, with your lot size and costs.">Paper</button>
+        <button class="tf" data-book="real" aria-pressed="false" data-tip="info" data-info="Real|Your real broker trades.">Real</button></div>
       <div class="callwrap" style="max-height:560px"><table class="calls" id="histTbl"></table></div>
       <div class="note">Signal-only: these are the brain's calls tracked to their outcome (P&amp;L per lot at the option bid,
         after estimated costs), not orders placed. Click a day to see its trades.</div>
@@ -696,6 +718,105 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     const cls = c.pnl_per_lot > 0 ? "win" : c.pnl_per_lot < 0 ? "loss" : "flat";
     return `<span class="oc ${cls}">${esc(c.outcome)}</span>`;
   }
+  // ---------- real money + paper (owner only: the server strips `execution` for everyone else) ----------
+  async function postJSON(path, body) {
+    const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    let j = {}; try { j = await r.json(); } catch {}
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    return j;
+  }
+  const BOOK_LABEL = {approval: "approve?", entry: "entering", open: "open", exiting: "exiting", closed: "closed", skipped: "skipped", missed: "missed"};
+  function bookCell(t, real) {
+    if (!t) return `<span class="st">—</span>`;
+    const pnl = t.pnl != null ? t.pnl : null;
+    let h = `<span class="st" title="${esc(t.reason || t.exit_reason || "")}">${esc(BOOK_LABEL[t.state] || t.state)}</span>`;
+    if (pnl != null) h += ` <b class="${pnlCls(pnl)}">${money(pnl)}</b>`;
+    else if (t.state === "skipped" || t.state === "missed") h = `<span class="st" title="${esc(t.reason || "")}">${esc(BOOK_LABEL[t.state])}: ${esc((t.reason || "").slice(0, 28))}</span>`;
+    if (real && ["open", "entry"].includes(t.state)) h += `<button class="xbtn" data-exit="${esc(t.call_id)}" title="Sell this real position now at the current price">Exit</button>`;
+    if (real && t.state === "approval") h += `<button class="xbtn ok" data-approve="${esc(t.call_id)}" title="Place this real order now">Approve</button>`;
+    return `<span class="bookcell">${h}</span>`;
+  }
+  function wireBookButtons(root) {
+    root.querySelectorAll("[data-exit]").forEach((b) => b.onclick = async (e) => {
+      e.stopPropagation(); b.disabled = true;
+      try { await postJSON("/api/real/exit", {call_id: b.dataset.exit}); toast("<b>Exit sent</b><br>Selling this real position at the current price. Paper keeps following its own rules."); }
+      catch (err) { toast(`<b>Exit failed</b><br>${esc(err.message)}`); b.disabled = false; }
+    });
+    root.querySelectorAll("[data-approve]").forEach((b) => b.onclick = async (e) => {
+      e.stopPropagation(); b.disabled = true;
+      try { await postJSON("/api/real/approve", {call_id: b.dataset.approve}); } catch (err) { toast(`<b>Approve failed</b><br>${esc(err.message)}`); b.disabled = false; }
+    });
+  }
+  let realDraft = "", capDraft = null, offlineReal = null, realDenied = false, realPollAt = 0;
+  // When the brain isn't running (weekend, before 09:00) the owner still gets the card from /api/real.
+  // Viewers get 401/403 there, so the card never appears for them.
+  async function pollReal(force) {
+    if (realDenied || (state && state.execution)) return;
+    if (!force && Date.now() - realPollAt < 15000) return;
+    realPollAt = Date.now();
+    try {
+      const r = await fetch("/api/real", {cache: "no-store"});
+      if (r.status === 401 || r.status === 403 || r.status === 404) { realDenied = r.status !== 401; return; }
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j.status) { offlineReal = Object.assign({}, j.status, j.real ? {on: !!j.real.on, why_off: j.real.why_off} : {}); renderReal(); }
+    } catch {}
+  }
+  function renderReal() {
+    let X = state && state.execution;
+    if (!X && offlineReal) X = {real_status: offlineReal, paper: {}, real: {}, offline: true};
+    $("realWrap").style.display = X ? "" : "none";
+    if (!X) { pollReal(false); return; }
+    const R = X.real_status || {}, P = X.paper || {}, RB = X.real || {};
+    const phrase = R.confirm_phrase || "yes use my real money";
+    const focus = document.activeElement && document.activeElement.id;
+    const realPnl = (RB.realized_pnl || 0) + (RB.unrealized_pnl || 0), paperPnl = (P.realized_pnl || 0) + (P.unrealized_pnl || 0);
+    const offNote = X.offline ? `<div class="st" style="flex-basis:100%;margin-bottom:6px">Brain isn't running right now (market closed or not started). You can connect Groww and set the switch and cap; trades start when the brain runs.${R.note ? " · " + esc(R.note) : ""}</div>` : "";
+    $("realBody").innerHTML = offNote + `
+      <div class="stat" data-tip="info" data-info="Real money|ON means the next new call places a real order (if funds and checks allow). OFF closes open real positions at the current price and disconnects the broker.">
+        <span>Real money</span><b class="${R.on ? "pos" : ""}">${R.on ? "ON" : "OFF"}</b>${!R.on && R.why_off ? `<span>${esc(R.why_off)}</span>` : ""}</div>
+      <div class="stat" data-tip="info" data-info="Broker|Your Groww connection for today. Approve today's API access on Groww's API Keys page, then press Connect Groww."><span>Broker</span><b>${R.connected ? "connected" : "not connected"}</b>${R.connected ? `<span>${esc(R.broker || "groww")}</span>` : `<span><button class="rbtn" id="connectBroker" style="padding:4px 10px">Connect Groww</button></span>`}</div>
+      <div class="stat" data-tip="info" data-info="Real P&L today|Closed plus open real trades, at the bid, after estimated costs."><span>Real today</span><b class="${pnlCls(realPnl)}">${money(realPnl)}</b><span>${RB.open || 0} open · ${RB.orders_today || 0} orders</span></div>
+      <div class="stat" data-tip="info" data-info="Paper today|Simulated orders at live bid/ask on every call. Always runs; never affected by real exits or switches."><span>Paper today</span><b class="${pnlCls(paperPnl)}">${money(paperPnl)}</b><span>${P.open || 0} open · ${P.orders_today || 0} orders</span></div>
+      <label class="stat" data-tip="info" data-info="Daily loss cap|When today's real loss reaches this, real money switches off and open real positions close. Max ₹${Math.round(R.loss_cap_max || 0).toLocaleString("en-IN")} (set in .env).">
+        <span>Daily loss cap (₹)</span><span style="display:flex;gap:6px"><input id="capIn" type="number" min="1" max="${R.loss_cap_max || ""}" step="100" value="${capDraft ?? Math.round(R.loss_cap || 0)}" style="width:110px"><button class="rbtn" id="capSave">Save</button></span></label>
+      <div class="stat" style="min-width:260px">
+        ${R.on
+          ? `<span>Turn off</span><span style="display:flex;gap:6px"><button class="rbtn stop" id="realOff" title="Closes open real positions at the current price, then disconnects">Turn real money off</button><button class="rbtn" id="exitAll" ${RB.open ? "" : "disabled"}>Exit all real</button></span>`
+          : `<span>Type <b style="font-size:12px">${esc(phrase)}</b> to turn on</span><span style="display:flex;gap:6px"><input id="phraseIn" autocomplete="off" placeholder="${esc(phrase)}" value="${esc(realDraft)}" style="width:190px"><button class="rbtn go" id="realOn" ${realDraft.trim().toLowerCase() === phrase ? "" : "disabled"}>Turn on</button></span>`}
+        <span>${R.lots || 1} lot per call · max ${R.max_open || 2} open${R.confirm_each ? " · you approve each entry" : ""}</span></div>`;
+    const ph = $("phraseIn");
+    if (ph) {
+      ph.oninput = () => { realDraft = ph.value; const ok = realDraft.trim().toLowerCase() === phrase; $("realOn").disabled = !ok; };
+      if (focus === "phraseIn") { ph.focus(); ph.setSelectionRange(ph.value.length, ph.value.length); }
+      $("realOn").onclick = async () => {
+        try { await postJSON("/api/real", {on: true, confirm: realDraft}); realDraft = ""; toast("<b>Real money ON</b><br>From the next new call, if funds and every check allow."); pollReal(true); }
+        catch (err) { toast(`<b>Not turned on</b><br>${esc(err.message)}`); }
+      };
+    }
+    if ($("connectBroker")) $("connectBroker").onclick = async () => {
+      $("connectBroker").disabled = true;
+      try { await postJSON("/api/real/connect", {}); toast("<b>Groww connected</b><br>Valid for today."); pollReal(true); }
+      catch (err) { toast(`<b>Groww not connected</b><br>${esc(err.message)}`); $("connectBroker").disabled = false; }
+    };
+    if ($("realOff")) $("realOff").onclick = async () => {
+      try { await postJSON("/api/real", {on: false}); toast("<b>Real money OFF</b><br>Closing open real positions at the current price, then disconnecting."); pollReal(true); }
+      catch (err) { toast(`<b>Failed</b><br>${esc(err.message)}`); }
+    };
+    if ($("exitAll")) $("exitAll").onclick = async () => {
+      try { await postJSON("/api/real/exit", {all: true}); toast("<b>Exit all sent</b><br>Selling every open real position now."); }
+      catch (err) { toast(`<b>Failed</b><br>${esc(err.message)}`); }
+    };
+    const ci = $("capIn");
+    ci.oninput = () => { capDraft = ci.value; };
+    if (focus === "capIn") { ci.focus(); }
+    $("capSave").onclick = async (e) => {
+      e.preventDefault();
+      try { await postJSON("/api/real", {loss_cap: Number(ci.value)}); capDraft = null; toast(`<b>Loss cap saved</b><br>₹${Number(ci.value).toLocaleString("en-IN")}`); pollReal(true); }
+      catch (err) { toast(`<b>Not saved</b><br>${esc(err.message)}`); }
+    };
+  }
+
   function renderCallsTable(S) {
     const all = S.calls || [];
     const D = S.today || {};
@@ -711,13 +832,17 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     const body = rows.map((c) => {
       const t = new Date(c.issued_ms).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit", hour12: false});
       const now = c.status === "closed" ? c.exit : c.last_bid;
+      const X = state.execution;
+      const books = X ? `<td>${bookCell((X.paper.trades || {})[c.id], false)}</td><td>${bookCell((X.real.trades || {})[c.id], true)}</td>` : "";
       return `<tr data-id="${esc(c.id)}" class="${c.id === selectedCall ? "sel" : ""}">
         <td style="text-align:left">${esc(t)}</td>
         <td style="text-align:left">${c.dir > 0 ? "▲" : "▼"} ${esc(c.und)} ${fmt(c.strike, 0)} ${esc(c.kind)} <span class="sub">${esc((c.expiry || "").slice(5))}</span></td>
         <td>${fmt(c.entry)}</td><td>${fmt(now)}</td><td>${outcomeChip(c)}</td>
-        <td class="${pnlCls(c.pnl_per_lot)}">${money(c.pnl_per_lot)}<span class="rr">${fmt(c.r_now)}R</span></td></tr>`;
+        <td class="${pnlCls(c.pnl_per_lot)}">${money(c.pnl_per_lot)}<span class="rr">${fmt(c.r_now)}R</span></td>${books}</tr>`;
     }).join("");
-    $("callsTbl").innerHTML = `<thead><tr><th style="text-align:left">Time</th><th style="text-align:left">Option</th><th>Entry</th><th>Exit / now</th><th>Result</th><th>P&L / lot · R</th></tr></thead><tbody>${body}</tbody>`;
+    const xh = state.execution ? `<th data-tip="info" data-info="Paper|Simulated order at live bid/ask for this call (your lot size, after costs). Always runs.">Paper</th><th data-tip="info" data-info="Real|Your real order for this call, or why it was skipped. Exit sells it now; paper is unaffected.">Real</th>` : "";
+    $("callsTbl").innerHTML = `<thead><tr><th style="text-align:left">Time</th><th style="text-align:left">Option</th><th>Entry</th><th>Exit / now</th><th>Result</th><th>P&L / lot · R</th>${xh}</tr></thead><tbody>${body}</tbody>`;
+    wireBookButtons($("callsTbl"));
     $("callsTbl").querySelectorAll("tbody tr[data-id]").forEach((tr) => tr.onclick = () => {
       selectedCall = selectedCall === tr.dataset.id ? null : tr.dataset.id;   // click again to go back to the live call
       const c = all.find((x) => x.id === tr.dataset.id);
@@ -770,6 +895,14 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
   const inr = (v) => (v == null ? "—" : `${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}`);
   const rr = (v) => (v == null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}R`);
   const cls = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
+  const rs = (v) => `₹${Math.round(v).toLocaleString("en-IN")}`;
+  function lotVal(t) {
+    const L = Number(t.lot) || 0;
+    if (!L || t.entry == null) return "—";
+    const a = Number(t.entry) * L, b = t.exit != null ? Number(t.exit) * L : null;
+    return `<span title="${L} × ${Number(t.entry).toFixed(2)}">${rs(a)}</span> → ${b != null ? `<span class="${cls(b - a)}">${rs(b)}</span>` : "—"}` +
+      `<span class="rr">lot ${L}</span>`;
+  }
   function fmtDay(d) { try { return new Date(d + "T12:00:00+05:30").toLocaleDateString("en-IN", {weekday: "short", day: "2-digit", month: "short"}); } catch { return d; } }
   function renderHistory() {
     const H = histData;
@@ -794,10 +927,12 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
           inner += `<tr><td style="text-align:left">${esc(t.time || "")}${t.exit_time ? "→" + esc(t.exit_time) : ""}</td>` +
             `<td style="text-align:left">${t.dir > 0 ? "▲" : "▼"} ${esc(t.symbol || t.und)}</td>` +
             `<td>${t.entry != null ? Number(t.entry).toFixed(2) : "—"} → ${t.exit != null ? Number(t.exit).toFixed(2) : "—"}</td>` +
+            `<td>${lotVal(t)}</td>` +
             `<td>${res}</td><td class="${cls(t.r_now)}">${rr(t.r_now)}</td><td class="${cls(t.pnl_per_lot)}">${inr(t.pnl_per_lot)}</td></tr>`;
         }
         body += `<tr class="trade"><td colspan="6" style="padding:0 0 6px 18px"><table class="calls"><thead><tr>` +
-          `<th style="text-align:left">Time</th><th style="text-align:left">Option</th><th>Entry → exit</th><th>Result</th>` +
+          `<th style="text-align:left">Time</th><th style="text-align:left">Option</th><th>Entry → exit (per unit)</th>` +
+          `<th data-tip="info" data-info="Lot value|What one lot cost at entry and was worth at exit: price × lot size (NIFTY 65, SENSEX 20). Before costs.">Lot value (1 lot)</th><th>Result</th>` +
           `<th>R</th><th>P&amp;L / lot</th></tr></thead><tbody>${inner}</tbody></table></td></tr>`;
       }
     }
@@ -807,8 +942,16 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
       const d = tr.dataset.day; histOpen.has(d) ? histOpen.delete(d) : histOpen.add(d); renderHistory();
     });
   }
+  let histBook = "signal";
+  document.querySelectorAll("#histBooks [data-book]").forEach((b) => b.onclick = () => {
+    histBook = b.dataset.book; histOpen.clear();
+    document.querySelectorAll("#histBooks [data-book]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    loadHistory();
+  });
   async function loadHistory() {
-    try { const r = await fetch("/api/history", {cache: "no-store"});
+    try {
+      $("histBooks").style.display = state && state.execution ? "" : "none";
+      const r = await fetch(`/api/history?book=${histBook}`, {cache: "no-store"});
           if (r.ok) { histData = await r.json(); if (!histOpen.size && histData.days && histData.days[0]) histOpen.add(histData.days[0].day); renderHistory(); }
           else $("histTotal").textContent = "Trade history unavailable right now.";
     } catch { $("histTotal").textContent = "Trade history unavailable right now."; }
@@ -1004,7 +1147,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
 
   function render() {
     if (!state) return;
-    renderHeader(); renderTiles(); renderChart(); renderTrade(); renderBrain(); renderSignals(); renderLadder(); renderSmile(); renderFlow(); renderTape(); checkAlerts();
+    renderHeader(); renderTiles(); try { renderReal(); } catch (e) { console.error(e); } renderChart(); renderTrade(); renderBrain(); renderSignals(); renderLadder(); renderSmile(); renderFlow(); renderTape(); checkAlerts();
     const f = state.feed || {};
     $("foot").textContent = `${f.note ? f.note + " · " : ""}Updated ${state.generated_at ? new Date(state.generated_at).toLocaleTimeString("en-IN") : "—"} · Personal research tool. Not investment advice. Signals (when any) are probabilities, never certainties.`;
   }
@@ -1015,6 +1158,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     state = obj; lastMsgAt = Date.now();
     try { paintSwitches((obj.signals || {}).rules); } catch {}
     try { $("brand").classList.toggle("live", obj.mode === "live"); } catch {}
+    try { if (obj.execution && $("histBooks").style.display === "none") $("histBooks").style.display = ""; } catch {}
     if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; render(); renderAge(); }); }
   }
   let es = null, pollTimer = null;

@@ -228,6 +228,27 @@ def test_v2_correlated_call_is_flagged():
     assert len(calls) == 2 and any(c["correlated_with"] for c in calls)
 
 
+def test_v2_correlation_block_switch():
+    # off by default: both same-direction calls fire (just flagged, per the test above)
+    eng_off = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    tr = _tracker()
+    for i in range(1201):
+        tr.sample("SENSEX", NOW_MS / 1000 - 1200 + i, {"cvd": 100.0 * i, "fut": 82060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
+                                                     "pe_oi_near": 5e5 + 300 * i, "ce_oi_near": 5e5 + 100 * i, "straddle": 900.0})
+    blk_off = eng_off.step(NOW_MS, {"NIFTY": _ctx(), "SENSEX": _ctx(spot=82000.0)}, tr)
+    assert len(blk_off["calls"]) == 2
+
+    # on: the second same-direction call is blocked (shadowed) instead of firing live
+    eng_on = SignalEngine(EngineConfig(correlation_block=True), store_dir=None, log=lambda *a: None)
+    tr2 = _tracker()
+    for i in range(1201):
+        tr2.sample("SENSEX", NOW_MS / 1000 - 1200 + i, {"cvd": 100.0 * i, "fut": 82060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
+                                                      "pe_oi_near": 5e5 + 300 * i, "ce_oi_near": 5e5 + 100 * i, "straddle": 900.0})
+    blk_on = eng_on.step(NOW_MS, {"NIFTY": _ctx(), "SENSEX": _ctx(spot=82000.0)}, tr2)
+    assert len(blk_on["calls"]) == 1
+    assert any("correlation block" in b for s in eng_on.shadows.values() for b in s.get("blocked_by") or [])
+
+
 def test_v2_loss_pause_switch():
     eng = SignalEngine(EngineConfig(loss_pause_n=2, cooldown_min=0), store_dir=None, log=lambda *a: None)
     tr = _tracker(); t = NOW_MS

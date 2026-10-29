@@ -206,10 +206,12 @@ a.back{{color:var(--ink2);text-decoration:none;font-size:13px;display:inline-blo
 
 
 def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_upstox_connected=None,
-               settings_store=None) -> FastAPI:
+               settings_store=None, order_broker_factory=None) -> FastAPI:
     """Build the app. Dependencies are injectable so tests can run without Google, Mongo or Modal."""
     if not s.session_secret:
         raise RuntimeError("TBRAIN_SESSION_SECRET is not set")
+    if order_broker_factory is None:
+        order_broker_factory = s.order_broker
     if settings_store is None:
         from tbrain.runtime_settings import FileSettings
         settings_store = FileSettings(s.data_dir / "live" / "settings.json")
@@ -262,7 +264,7 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
         return None
 
     def is_owner(u: dict) -> bool:
-        return bool(s.owner_email) and u["email"] == s.owner_email
+        return bool(u) and bool(s.owner_email) and u.get("email") == s.owner_email
 
     def base(request: Request) -> str:
         return s.public_url or str(request.base_url).rstrip("/")
@@ -444,19 +446,124 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
         return RedirectResponse("/admin/access", status_code=303)
 
     @app.get("/api/history")
-    async def api_history(request: Request, days: int = 60):
-        if not user(request):
+    async def api_history(request: Request, days: int = 60, book: str = "signal"):
+        u = user(request)
+        if not u:
             return JSONResponse({"error": "sign in"}, status_code=401)
         from tbrain import history as H
         days = max(1, min(int(days), 365))
+        if book not in ("signal", "paper", "real"):
+            return JSONResponse({"error": "book must be signal, paper or real"}, status_code=400)
+        if book != "signal" and not is_owner(u):
+            return JSONResponse({"error": "owner only"}, status_code=403)
         try:
-            if db is not None:
+            if book != "signal":
+                h = await asyncio.to_thread(H.from_mongo_exec, db, s.owner_email or None, book, days) if db is not None \
+                    else await asyncio.to_thread(H.from_exec_files, s.data_dir, book, days)
+            elif db is not None:
                 h = await asyncio.to_thread(H.from_mongo, db, s.owner_email or None, days)
             else:
                 h = await asyncio.to_thread(H.from_files, s.data_dir, days)
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": f"history unavailable: {type(e).__name__}"}, status_code=503)
         return JSONResponse(h, headers={"Cache-Control": "no-store"})
+
+    # ---------------- real money (OWNER ONLY). Every other account sees signals only.
+    def _owner_json(request: Request):
+        u = user(request)
+        if not u:
+            return None, JSONResponse({"error": "sign in"}, status_code=401)
+        if not is_owner(u):
+            return None, JSONResponse({"error": "owner only"}, status_code=403)
+        if "application/json" not in (request.headers.get("content-type") or "") and request.method == "POST":
+            return None, JSONResponse({"error": "json only"}, status_code=415)
+        return u, None
+
+    @app.get("/api/real")
+    async def real_get(request: Request):
+        u, err = _owner_json(request)
+        if err:
+            return err
+        from tbrain.ui.server import offline_real_status
+        return {"real": await asyncio.to_thread(settings_store.get_real),
+                "defaults": {"loss_cap": s.real_daily_loss_cap, "loss_cap_max": s.real_loss_cap_max},
+                "status": await asyncio.to_thread(offline_real_status, s, settings_store)}
+
+    @app.post("/api/real")
+    async def real_set(request: Request):
+        u, err = _owner_json(request)
+        if err:
+            return err
+        from tbrain.execution.hub import CONFIRM_PHRASE
+        try:
+            body = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "bad json"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "bad json"}, status_code=400)
+        if "loss_cap" in body:
+            try:
+                cap = float(body["loss_cap"])
+            except (TypeError, ValueError):
+                return JSONResponse({"error": "loss cap must be a number"}, status_code=400)
+            if not (0 < cap <= s.real_loss_cap_max):
+                return JSONResponse({"error": f"loss cap must be between 1 and {s.real_loss_cap_max:,.0f}"}, status_code=400)
+            await asyncio.to_thread(settings_store.set_real, loss_cap=cap)
+        if "on" in body:
+            if body["on"] is True:
+                if str(body.get("confirm", "")).strip().lower() != CONFIRM_PHRASE:
+                    return JSONResponse({"error": f'type exactly: {CONFIRM_PHRASE}'}, status_code=400)
+                await asyncio.to_thread(settings_store.set_real, on=True, why_off=None)
+            elif body["on"] is False:
+                await asyncio.to_thread(settings_store.set_real, on=False, why_off="switched off by you")
+            else:
+                return JSONResponse({"error": "on must be true or false"}, status_code=400)
+        return {"real": await asyncio.to_thread(settings_store.get_real)}
+
+    @app.post("/api/real/connect")
+    async def real_connect(request: Request):
+        """Owner: log in to Groww for today through the static-IP order server."""
+        u, err = _owner_json(request)
+        if err:
+            return err
+        rb = order_broker_factory() if order_broker_factory else None
+        if rb is None:
+            return JSONResponse({"error": "order server is not set up yet (TBRAIN_ORDER_SERVER_URL / _TOKEN)"}, status_code=400)
+        try:
+            r = await asyncio.to_thread(rb.connect)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:300]}, status_code=502)
+        return {"connected": bool(r.get("connected"))}
+
+    @app.post("/api/real/exit")
+    async def real_exit(request: Request):
+        u, err = _owner_json(request)
+        if err:
+            return err
+        try:
+            body = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "bad json"}, status_code=400)
+        if isinstance(body, dict) and body.get("all") is True:
+            c = await asyncio.to_thread(settings_store.push_command, "exit_all")
+        elif isinstance(body, dict) and isinstance(body.get("call_id"), str) and body["call_id"]:
+            c = await asyncio.to_thread(settings_store.push_command, "exit", body["call_id"])
+        else:
+            return JSONResponse({"error": "send {call_id} or {all: true}"}, status_code=400)
+        return {"queued": c}
+
+    @app.post("/api/real/approve")
+    async def real_approve(request: Request):
+        u, err = _owner_json(request)
+        if err:
+            return err
+        try:
+            body = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "bad json"}, status_code=400)
+        if not (isinstance(body, dict) and isinstance(body.get("call_id"), str) and body["call_id"]):
+            return JSONResponse({"error": "send {call_id}"}, status_code=400)
+        return {"queued": await asyncio.to_thread(settings_store.push_command, "approve", body["call_id"])}
 
     @app.get("/api/settings")
     async def get_settings(request: Request):
@@ -486,12 +593,16 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
         if not user(request):
             return JSONResponse({"error": "sign in"}, status_code=401)
         st = await asyncio.to_thread(state_source.latest)
+        if not is_owner(user(request)):
+            st = {k: v for k, v in st.items() if k != "execution"}     # paper/real are owner-only
         return JSONResponse(st, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/stream")
     async def api_stream(request: Request):
         if not user(request):
             return JSONResponse({"error": "sign in"}, status_code=401)
+
+        owner = is_owner(user(request))
 
         async def gen():
             # Hosting platforms cap request time (Modal: 150 s), so each stream ends after STREAM_MAX_S and the
@@ -504,6 +615,8 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
                 if asyncio.get_running_loop().time() - started > STREAM_MAX_S:
                     return
                 st = await asyncio.to_thread(state_source.latest)
+                if not owner:
+                    st = {k: v for k, v in st.items() if k != "execution"}   # paper/real are owner-only
                 payload = json.dumps(st, default=str, separators=(",", ":"))
                 if payload != last:
                     last = payload

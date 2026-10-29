@@ -68,7 +68,7 @@ def test_web_history_needs_sign_in_and_reads_mongo():
 def test_local_ui_serves_history(tmp_path):
     import urllib.request
     from tbrain.ui.server import Broadcaster, UIServer
-    srv = UIServer(Broadcaster(), 8792, history=lambda: H.summarize(CALLS)).start()
+    srv = UIServer(Broadcaster(), 8792, history=lambda book="signal": H.summarize(CALLS)).start()
     try:
         h = json.loads(urllib.request.urlopen("http://127.0.0.1:8792/api/history").read())
         assert h["total"]["pnl_per_lot"] == 1750

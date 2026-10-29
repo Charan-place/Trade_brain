@@ -33,7 +33,7 @@ def _parse_underlyings(raw: str) -> tuple[tuple[str, str], ...]:
     return tuple(out)
 
 
-ENV_PREFIXES = ("UPSTOX_", "TBRAIN_", "MONGODB_", "GOOGLE_")
+ENV_PREFIXES = ("UPSTOX_", "TBRAIN_", "MONGODB_", "GOOGLE_", "GROWW_")
 
 
 def load_env(path: Path | None = None) -> dict[str, str]:
@@ -95,6 +95,20 @@ class Settings:
     dd_stop: bool = True
     dd_peak_r: float = 2.0
     dd_giveback_r: float = 2.0
+    # Execution (paper always; real only for the owner, when switched on + connected + funded)
+    real_daily_loss_cap: float = 3000.0
+    real_loss_cap_max: float = 10000.0
+    real_lots: int = 1
+    real_max_open: int = 2
+    real_max_orders: int = 20
+    real_confirm_each: bool = True
+    real_max_price_gap_pct: float = 1.0
+    real_safety_stop_r: float = 2.0
+    real_entry_timeout_s: float = 20.0
+    # Static-IP order server (Phase 2). Empty URL = no real broker (real leg is skipped, paper still runs).
+    order_server_url: str = ""
+    order_server_token: str = field(default="", repr=False)
+    order_server_cert: str = field(default="", repr=False)
     # Storage (optional): MongoDB keeps calls, shadows, minute features and sessions for training. Empty = off.
     mongodb_uri: str = field(default="", repr=False)
     mongodb_db: str = "tbrain"
@@ -106,6 +120,13 @@ class Settings:
     owner_email: str = ""
     session_secret: str = field(default="", repr=False)
     encryption_key: str = field(default="", repr=False)
+
+    def order_broker(self, timeout: float = 10.0):
+        """RemoteBroker for the static-IP order server, or None when it is not configured."""
+        if not (self.order_server_url and self.order_server_token):
+            return None
+        from tbrain.brokers.remote import RemoteBroker
+        return RemoteBroker(self.order_server_url, self.order_server_token, self.order_server_cert or None, timeout=timeout)
 
     def cutoff_time(self):
         """afternoon_cutoff as a datetime.time, or None when switched off."""
@@ -147,6 +168,18 @@ class Settings:
             dd_stop=e.get("TBRAIN_DD_STOP", "1") not in ("0", "false", "False", "off"),
             dd_peak_r=float(e.get("TBRAIN_DD_PEAK_R", 2.0)),
             dd_giveback_r=float(e.get("TBRAIN_DD_GIVEBACK_R", 2.0)),
+            real_daily_loss_cap=float(e.get("TBRAIN_REAL_DAILY_LOSS_CAP", 3000)),
+            real_loss_cap_max=float(e.get("TBRAIN_REAL_DAILY_LOSS_CAP_MAX", 10000)),
+            real_lots=max(1, _int(e, "TBRAIN_REAL_LOTS", 1)),
+            real_max_open=max(1, _int(e, "TBRAIN_REAL_MAX_OPEN", 2)),
+            real_max_orders=max(1, _int(e, "TBRAIN_REAL_MAX_ORDERS", 20)),
+            real_confirm_each=e.get("TBRAIN_REAL_CONFIRM_EACH", "1") not in ("0", "false", "False", "off"),
+            real_max_price_gap_pct=float(e.get("TBRAIN_REAL_MAX_PRICE_GAP_PCT", 1.0)),
+            real_safety_stop_r=float(e.get("TBRAIN_REAL_SAFETY_STOP_R", 2.0)),
+            real_entry_timeout_s=float(e.get("TBRAIN_REAL_ENTRY_TIMEOUT_S", 20)),
+            order_server_url=e.get("TBRAIN_ORDER_SERVER_URL", "").rstrip("/"),
+            order_server_token=e.get("TBRAIN_ORDER_SERVER_TOKEN", ""),
+            order_server_cert=e.get("TBRAIN_ORDER_SERVER_CERT", "").replace("\\n", "\n"),
             data_dir=Path(e["TBRAIN_DATA_DIR"]) if e.get("TBRAIN_DATA_DIR") else cls.data_dir,
             secrets_dir=Path(e["TBRAIN_SECRETS_DIR"]) if e.get("TBRAIN_SECRETS_DIR") else cls.secrets_dir,
             mongodb_uri=e.get("MONGODB_URI", ""),
