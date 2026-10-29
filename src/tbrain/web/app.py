@@ -402,6 +402,17 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
                 pass
         return RedirectResponse("/", status_code=303)
 
+    def csrf_token(request: Request) -> str:
+        tok = request.session.get("csrf")
+        if not tok:
+            tok = secrets.token_urlsafe(24)
+            request.session["csrf"] = tok
+        return tok
+
+    def csrf_ok(request: Request, token: str) -> bool:
+        expected = request.session.get("csrf")
+        return bool(expected) and secrets.compare_digest(token or "", expected)
+
     @app.get("/admin/access", response_class=HTMLResponse)
     async def admin_access(request: Request):
         u = user(request)
@@ -409,26 +420,29 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
             return RedirectResponse("/", status_code=303)
         if db is None:
             return PlainTextResponse("Server is missing MONGODB_URI.", status_code=500)
+        tok = csrf_token(request)
         rows = []
         for doc in db.access.find().sort("requested_at", -1):
             email, status = doc["_id"], doc.get("status", "pending")
             name = doc.get("name") or ""
             from urllib.parse import quote
-            actions = "".join(
-                f'<form method="post" action="/admin/access/{a}?email={quote(email)}" style="display:inline">'
-                f'<button class="a-{a}">{a.title()}</button></form>'
-                for a in (("approve", "deny") if status != "approved" else ("deny",)))
+
+            def form(action: str, cls: str) -> str:
+                return (f'<form method="post" action="/admin/access/{action}?email={quote(email)}" style="display:inline">'
+                        f'<input type="hidden" name="csrf" value="{tok}">'
+                        f'<button class="a-{cls}">{action.title()}</button></form>')
+
+            actions = "".join(form(a, a) for a in (("approve", "deny") if status != "approved" else ("deny",)))
             if status == "denied":
-                actions += (f'<form method="post" action="/admin/access/approve?email={quote(email)}" style="display:inline">'
-                            f'<button class="a-approve">Approve</button></form>')
+                actions += form("approve", "approve")
             rows.append(f'<tr><td>{email}</td><td>{name}</td><td><span class="st st-{status}">{status}</span></td><td>{actions}</td></tr>')
         table = "\n".join(rows) or '<tr><td colspan="4" style="color:var(--ink2)">No access requests yet.</td></tr>'
         return HTMLResponse(ADMIN_HTML.format(rows=table))
 
     @app.post("/admin/access/approve")
-    async def admin_approve(request: Request, email: str = ""):
+    async def admin_approve(request: Request, email: str = "", csrf: str = ""):
         u = user(request)
-        if not u or not is_owner(u) or db is None:
+        if not u or not is_owner(u) or db is None or not csrf_ok(request, csrf):
             return RedirectResponse("/", status_code=303)
         email = email.lower()
         if email:
@@ -436,9 +450,9 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
         return RedirectResponse("/admin/access", status_code=303)
 
     @app.post("/admin/access/deny")
-    async def admin_deny(request: Request, email: str = ""):
+    async def admin_deny(request: Request, email: str = "", csrf: str = ""):
         u = user(request)
-        if not u or not is_owner(u) or db is None:
+        if not u or not is_owner(u) or db is None or not csrf_ok(request, csrf):
             return RedirectResponse("/", status_code=303)
         email = email.lower()
         if email:

@@ -138,10 +138,13 @@ class GrowwBroker:
             api = self.api
             try:                                           # idempotency: did an earlier attempt already reach Groww?
                 prev = _payload(api.get_order_status_by_reference(segment=api.SEGMENT_FNO, order_reference_id=gref))
-                if prev.get("groww_order_id"):
-                    return self._refresh(prev["groww_order_id"], ref, instrument, side, qty, kind, price, trigger, force=True)
-            except Exception:  # noqa: BLE001 - "not found" is the normal case
-                pass
+            except Exception as e:  # noqa: BLE001 - growwapi raises a generic error for "not found" too; can't
+                # tell that apart from a transient failure by type/message, so treat ANY failure here as
+                # "idempotency unverified" and refuse to place rather than risk a silent duplicate order.
+                raise BrokerError(f"could not verify order reference {gref!r} before placing: "
+                                  f"{type(e).__name__}: {str(e)[:160]}") from None
+            if prev.get("groww_order_id"):
+                return self._refresh(prev["groww_order_id"], ref, instrument, side, qty, kind, price, trigger, force=True)
             order_type = {"LIMIT": api.ORDER_TYPE_LIMIT, "MARKET": api.ORDER_TYPE_MARKET,
                           "SL_M": api.ORDER_TYPE_STOP_LOSS_MARKET}[kind]
             try:

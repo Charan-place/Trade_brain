@@ -77,7 +77,7 @@ class FakeGroww:
 
     def get_order_status_by_reference(self, segment, order_reference_id, timeout=None):
         if order_reference_id not in self.by_ref:
-            raise RuntimeError("not found")
+            return {"status": "SUCCESS", "payload": {}}  # genuinely no prior order: a normal empty result, not an error
         o = self.orders[self.by_ref[order_reference_id]]
         return {"status": "SUCCESS", "payload": {"groww_order_id": o["groww_order_id"], "order_status": o["order_status"]}}
 
@@ -150,6 +150,21 @@ def test_lost_reply_is_recovered_by_reference_never_duplicated():
     o = b.place(ref="real:c2:E", instrument="NSE_FO|35003", side="BUY", qty=65, kind="LIMIT", price=100.0)  # retry
     assert len([c for c in f.calls if c[0] == "place"]) == 1 and o.filled_qty == 65   # only ONE real order
     assert f.by_ref[groww_ref("real:c2:E")] == o.id
+
+
+def test_idempotency_check_failure_refuses_to_place_rather_than_risk_a_duplicate():
+    b, f = gb()
+    orig = f.get_order_status_by_reference
+
+    def flaky(*a, **kw):
+        raise TimeoutError("network blip")
+    f.get_order_status_by_reference = flaky
+    with pytest.raises(BrokerError, match="could not verify order reference"):
+        b.place(ref="real:c9:E", instrument="NSE_FO|35003", side="BUY", qty=65, kind="LIMIT", price=100.0)
+    assert not any(c[0] == "place" for c in f.calls)   # never reached Groww's place_order
+    f.get_order_status_by_reference = orig
+    o = b.place(ref="real:c9:E", instrument="NSE_FO|35003", side="BUY", qty=65, kind="LIMIT", price=100.0)
+    assert o.filled_qty == 65   # works normally once the lookup is healthy again
 
 
 def test_rejections_lots_freeze_and_disconnected_refusals():
