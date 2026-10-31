@@ -107,6 +107,23 @@ Rules tested on the same 55 calls (exact: they only remove later calls; decision
 - Both are **gates that create shadows**, so the scorecard keeps measuring them ("afternoon cutoff", "drawdown stop").
   Review after ~10 more trading days: if blocked afternoon shadows are net positive, switch the cutoff off.
 - These are discipline rules, not better predictions. In-sample (same 4 days the pattern came from): expect less than +11.8R.
+
+## Afternoon cutoff moved to 12:00 (2026-10-31, from 9 live days: 19-30 Oct, 111 calls)
+The ~10-day review above confirmed and sharpened the original finding: the losing window starts an hour earlier
+than first thought.
+| Hour of entry | Calls | Wins | Pnl/lot |
+|---|---|---|---|
+| 09:00 | 10 | 4 | +15,297 |
+| 10:00 | 25 | 9 | −127 |
+| 11:00 | 27 | 19 | **+21,030** (best hour) |
+| 12:00 | 19 | 5 | **−4,870** |
+| 13:00 | 18 | 7 | −4,446 |
+| 14:00 | 12 | 2 | **−7,924** (worst hour) |
+12:00 onward cost −17,240 pnl/lot across the 9 days; 09:00-11:59 alone made +36,200. `afternoon_cutoff` moved
+from 13:00 to 12:00 to match. `allow_afternoon` stays off by default (dashboard switch, same as before).
+Also note by regime across the same 9 days: `trend` averaged +1.01R/call, `range` averaged −0.09R/call —
+`regime_gate` recalibration is now backed by real volume and worth revisiting (it was rejected on 1 day in the
+v2.1 note above for being "too strict"; 9 days of range-regime underperformance is a different kind of evidence).
 - Switches live in `data/live/settings.json` (local) or the Modal Dict (hosted); the brain re-reads them every 15 s.
   Only the owner account can change them; viewers see them read-only.
 

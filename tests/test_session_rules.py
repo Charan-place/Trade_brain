@@ -1,4 +1,4 @@
-"""v2.2 session rules: 13:00 afternoon cutoff (dashboard switch) and drawdown stop, both shadow-tracked."""
+"""v2.2 session rules: 12:00 afternoon cutoff (dashboard switch) and drawdown stop, both shadow-tracked."""
 import json
 from datetime import datetime, time as dtime
 
@@ -23,11 +23,11 @@ def _step(eng, now_ms):
         T.NOW_MS = old
 
 
-def test_no_new_calls_after_13_by_default_but_blocked_one_is_a_shadow():
+def test_no_new_calls_after_12_by_default_but_blocked_one_is_a_shadow():
     eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
-    out = _step(eng, _at(13, 5))
+    out = _step(eng, _at(12, 5))
     assert not out["calls"]
-    assert "afternoon calls are off after 13:00" in (out["diagnostics"]["NIFTY"]["blocked"] or "")
+    assert "afternoon calls are off after 12:00" in (out["diagnostics"]["NIFTY"]["blocked"] or "")
     (sh,) = eng.shadows.values()
     assert "afternoon cutoff" in {SignalEngine.blocker_key(b) for b in sh["blocked_by"]}
 
@@ -35,9 +35,9 @@ def test_no_new_calls_after_13_by_default_but_blocked_one_is_a_shadow():
 def test_switch_on_allows_afternoon_calls_and_morning_is_unaffected():
     eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
     assert eng.apply_settings({"allow_afternoon": True}) == {"allow_afternoon": True}
-    assert len(_step(eng, _at(13, 5))["calls"]) == 1
+    assert len(_step(eng, _at(12, 5))["calls"]) == 1
     eng2 = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
-    assert len(_step(eng2, _at(10, 30))["calls"]) == 1                     # before 13:00: unchanged
+    assert len(_step(eng2, _at(10, 30))["calls"]) == 1                     # before 12:00: unchanged
 
 
 def test_apply_settings_whitelists_booleans_only():
@@ -85,7 +85,7 @@ def test_drawdown_stop_ignores_yesterday_and_small_peaks():
 def test_rules_block_reports_switch_state():
     eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
     r = _step(eng, _at(10, 30))["rules"]
-    assert r["afternoon_cutoff"] == "13:00" and r["allow_afternoon"] is False and r["dd_stop"] is True
+    assert r["afternoon_cutoff"] == "12:00" and r["allow_afternoon"] is False and r["dd_stop"] is True
 
 
 @pytest.mark.parametrize("store_factory", [lambda tmp: FileSettings(tmp / "live" / "settings.json"),
@@ -102,7 +102,7 @@ def test_backtest_presets_keep_old_behaviour_reproducible():
     from tbrain.backtest.replay import preset
     assert preset("v2.1").allow_afternoon is True and preset("v2.1").dd_stop is False      # live 19-23 Oct rules
     assert preset("v2.2").allow_afternoon is False and preset("v2.2").dd_stop is True
-    assert preset("v2.2").afternoon_cutoff == dtime(13, 0)
+    assert preset("v2.2").afternoon_cutoff == dtime(12, 0)
     assert preset("v2.2+afternoon").allow_afternoon is True
 
 

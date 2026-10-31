@@ -202,7 +202,7 @@ The brain only suggests. If **you** choose to act on a call:
 | `TBRAIN_TREND_K` | `1.5` | v2: last-60-min index move must be ≥ k × ATR in the call's direction (`off` disables) |
 | `TBRAIN_LOSS_PAUSE_N` | `0` | Pause an index after N consecutive SLs (off by default) |
 | `TBRAIN_REGIME_GATE` | `0` | Breakout calls only in a `trend` regime |
-| `TBRAIN_AFTERNOON_CUTOFF` | `13:00` | v2.2: no new calls after this time (`off` = none). Dashboard switch *Afternoon calls* overrides it live |
+| `TBRAIN_AFTERNOON_CUTOFF` | `12:00` | v2.2: no new calls after this time (`off` = none). Dashboard switch *Afternoon calls* overrides it live |
 | `TBRAIN_ALLOW_AFTERNOON` | `0` | Start with afternoon calls allowed |
 | `TBRAIN_DD_STOP`, `TBRAIN_DD_PEAK_R`, `TBRAIN_DD_GIVEBACK_R` | `1`, `2`, `2` | v2.2 drawdown stop (dashboard switch *Drawdown stop*) |
 | `TBRAIN_PREMIUM_STOP` | `0` | Also stop when the option bid+LTP hit the SL premium |

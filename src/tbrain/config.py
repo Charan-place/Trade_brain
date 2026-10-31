@@ -90,7 +90,7 @@ class Settings:
     premium_stop: bool = False
     fut_oi_fresh: bool = False
     # v2.2 session rules (defaults; the dashboard switches override allow_afternoon / dd_stop at runtime)
-    afternoon_cutoff: str = "13:00"     # "off" = no cutoff
+    afternoon_cutoff: str = "12:00"     # "off" = no cutoff
     allow_afternoon: bool = False
     dd_stop: bool = True
     dd_peak_r: float = 2.0
@@ -163,7 +163,7 @@ class Settings:
             regime_gate=e.get("TBRAIN_REGIME_GATE", "0") in ("1", "true", "True", "on"),
             premium_stop=e.get("TBRAIN_PREMIUM_STOP", "0") in ("1", "true", "True", "on"),
             fut_oi_fresh=e.get("TBRAIN_FUT_OI_FRESH", "0") in ("1", "true", "True", "on"),
-            afternoon_cutoff=e.get("TBRAIN_AFTERNOON_CUTOFF", "13:00").strip() or "13:00",
+            afternoon_cutoff=e.get("TBRAIN_AFTERNOON_CUTOFF", "12:00").strip() or "12:00",
             allow_afternoon=e.get("TBRAIN_ALLOW_AFTERNOON", "0") in ("1", "true", "True", "on"),
             dd_stop=e.get("TBRAIN_DD_STOP", "1") not in ("0", "false", "False", "off"),
             dd_peak_r=float(e.get("TBRAIN_DD_PEAK_R", 2.0)),

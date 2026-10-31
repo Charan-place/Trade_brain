@@ -209,7 +209,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     <div class="tabs" role="tablist" id="tabs"></div>
     <select id="expiry" aria-label="Expiry"></select>
     <div class="ctrls" role="group" aria-label="Brain switches">
-    <button class="alertbtn" id="sw-afternoon" aria-pressed="false" data-key="allow_afternoon" title="After 13:00 the brain stops issuing NEW calls (live 19-23 Oct: 20 afternoon calls, 4 wins, -11.8R). Turn on to keep getting calls until 14:45. Blocked calls are still tracked as shadows.">🌇 Afternoon calls: off</button>
+    <button class="alertbtn" id="sw-afternoon" aria-pressed="false" data-key="allow_afternoon" title="After 12:00 the brain stops issuing NEW calls (9 live days 19-30 Oct: 12:00-13:59 pnl -9,316, 14:00+ pnl -7,924). Turn on to keep getting calls until 14:45. Blocked calls are still tracked as shadows.">🌇 Afternoon calls: off</button>
     <button class="alertbtn" id="sw-dd" aria-pressed="true" data-key="dd_stop" title="Drawdown stop: once today's closed calls have been +2R or more and then give back 2R, no new calls for the rest of the day. Blocked calls are still tracked as shadows.">🛑 Drawdown stop: on</button>
     <button class="alertbtn" id="alerts" aria-pressed="false" title="Sound + desktop notification on new calls, T1, SL">🔕 Alerts off</button>
     </div>
@@ -390,7 +390,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     ["#age", "Data age|Screen: how old this snapshot is. Exchange: time since the index last ticked. Upstox→us: network delay."],
     ["#tabs", "Index|Switch the whole page between NIFTY and SENSEX."],
     ["#expiry", "Expiry|Which option expiry the chain, smile and ladder show."],
-    ["#sw-afternoon", "Afternoon calls|Off: no new calls after 13:00 (afternoon calls have mostly lost so far). On: calls until 14:45."],
+    ["#sw-afternoon", "Afternoon calls|Off: no new calls after 12:00 (afternoon calls have mostly lost so far). On: calls until 14:45."],
     ["#sw-dd", "Drawdown stop|On: once today's closed calls reach +2R and then give back 2R, no new calls today."],
     ["#alerts", "Alerts|Sound and a desktop notification on every new call, T1 and stop-loss."],
     ["#theme", "Theme|Switch between light and dark."],
@@ -510,7 +510,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     regime: "Labels the market trend / range / mixed every minute and saves it on each call. It does not block calls until it is recalibrated.",
     cortex: "Future machine-learning layer that will learn which setups really win. Needs a few weeks of saved calls first.",
     judgement: "Decides calls: 5 of 7 clues + both must-haves (VWAP side, 60-min trend) + a breakout. Runs live during market hours.",
-    reflex: "Safety checks before any call: time window, 13:00 cutoff, drawdown stop, cooldown, one call per index, spread, depth, R:R, fresh data.",
+    reflex: "Safety checks before any call: time window, 12:00 cutoff, drawdown stop, cooldown, one call per index, spread, depth, R:R, fresh data.",
     mirror: "Tracks every call and blocked call (shadow) to its result and keeps the scoreboard.",
   };
   function renderBrain() {
@@ -982,7 +982,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
       if (!ruleCanEdit) return;
       const cur = key in ruleSettings ? ruleSettings[key] : dflt;
       const msg = key === "allow_afternoon" && !cur
-        ? "Turn ON calls after 13:00? Afternoon calls have lost money so far (20 calls, 4 wins, -11.8R over 19-23 Oct)."
+        ? "Turn ON calls after 12:00? Afternoon calls have lost money so far (12:00-13:59 pnl -9,316, 14:00+ pnl -7,924 over 9 live days, 19-30 Oct)."
         : null;
       if (msg && !window.confirm(msg)) return;
       try {

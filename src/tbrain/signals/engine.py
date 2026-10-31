@@ -3,7 +3,7 @@
 Per index, every brain tick:
   * BREAKOUT playbook (can issue live calls): 7 clues (1 pt each) + trigger (1-min close breaks the 10-min high/low)
     + MUST filters (VWAP side, 60-min trend) + gates (window, cooldown, open call, regime*, loss pause*,
-    afternoon cutoff (13:00, dashboard switch), drawdown stop (today's closed R gives back 2R from a +2R peak)).
+    afternoon cutoff (12:00, dashboard switch), drawdown stop (today's closed R gives back 2R from a +2R peak)).
   * RANGE-FADE playbook (shadow-only until evidence): in a range regime, a rejection candle at the 60-min extreme,
     target = VWAP.
   * SHADOW CALLS: any candidate that is blocked (by a filter, gate or build check) is tracked silently to its outcome,
@@ -61,8 +61,8 @@ class EngineConfig:
     trend_er: float = 0.25            # efficiency ratio over 60 min at/above which the market is trending
     range_er: float = 0.15            # ... below which it is ranging
     range_crosses: int = 4            # VWAP crossings in 60 min that also mark a range
-    # ---- v2.2 session rules (4 live days 19-23 Oct: calls after 13:00 = 20 calls, 4 wins, -11.8R) ----
-    afternoon_cutoff: dtime | None = dtime(13, 0)   # no NEW calls after this unless allow_afternoon (UI switch)
+    # ---- v2.2 session rules (9 live days 19 Oct-30 Oct: 12:00-13:59 = -9,316, 14:00+ = -7,924 pnl/lot) ----
+    afternoon_cutoff: dtime | None = dtime(12, 0)   # no NEW calls after this unless allow_afternoon (UI switch)
     allow_afternoon: bool = False
     dd_stop: bool = True              # stop new calls once today's realized R falls dd_giveback_r from a peak >= dd_peak_r
     dd_peak_r: float = 2.0

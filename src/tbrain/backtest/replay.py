@@ -30,7 +30,7 @@ PRESETS: dict[str, dict] = {
     "v2": dict(fut_oi_fresh=True, premium_stop=True, **_NO_SESSION_RULES),   # first v2 (all new filters)
     "v2.1": dict(**_NO_SESSION_RULES),                  # v1 + trend + VWAP (live 19-23 Oct)
     "v2.1+regime": dict(regime_gate=True, **_NO_SESSION_RULES),
-    "v2.2": dict(),                                     # current defaults: v2.1 + 13:00 cutoff + drawdown stop
+    "v2.2": dict(),                                     # current defaults: v2.1 + 12:00 cutoff + drawdown stop
     "v2.2+afternoon": dict(allow_afternoon=True),       # v2.2 with the afternoon switch ON
 }
 
