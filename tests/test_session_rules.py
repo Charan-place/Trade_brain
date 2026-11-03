@@ -179,9 +179,58 @@ def test_direction_check_on_still_rides_when_trend_holds():
     assert c["t1_check"]["favorable"] is True
 
 
-def test_direction_check_fast_layer_exits_on_a_cvd_and_price_reversal_before_any_candle_closes():
-    """Fast layer: a sharp reversal in order flow should exit on the VERY NEXT tick, not wait minutes for
-    a completed candle or the slow-layer interval - options can give back profit in seconds."""
+def test_direction_check_fast_layer_ignores_profit_in_the_first_120s():
+    """The min-hold gate: even a hard reversal must not close the call before direction_check_min_hold_s,
+    so a normal post-entry wobble can't be mistaken for a reversal before the trade had time to develop."""
+    from tbrain.brain.features import FeatureTracker
+    eng = SignalEngine(EngineConfig(t1_direction_check=True), store_dir=None, log=lambda *a: None)
+    ctx = T._ctx()
+    tr = FeatureTracker()
+    t0 = T.NOW_MS / 1000 - 1200
+    for i in range(1201):
+        tr.sample("NIFTY", t0 + i, {"cvd": 100.0 * i, "fut": 25060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
+                                     "pe_oi_near": 5e5 + 300 * i, "ce_oi_near": 5e5 + 100 * i, "straddle": 300.0})
+    (c,) = eng.step(T.NOW_MS, {"NIFTY": ctx}, tr)["calls"]
+    key = c["instrument_key"]
+    ctx2 = dict(ctx, spot=c["u_t1"] + 1)
+    ctx2["quotes"] = dict(ctx["quotes"]); ctx2["quotes"][key] = {"bp1": c["p_t1"], "ap1": c["p_t1"] + 0.2, "ltp": c["p_t1"]}
+    t1 = T.NOW_MS / 1000 + 10
+    for i in range(1, 61):   # CVD/price reverse hard, but we're only 70s past entry: still inside the min-hold gate
+        tr.sample("NIFTY", t1 + i, {"cvd": 120_000.0 - 500.0 * i, "fut": 25120.0 - 5.0 * i})
+    eng.step(int(t1 + 60) * 1000, {"NIFTY": ctx2}, tr)
+    c = eng.calls[c["id"]]
+    assert c["status"] == "t1" and "t1_check" not in c   # too soon: check never ran at all
+
+
+def test_direction_check_fast_layer_needs_two_confirms_before_closing():
+    """A single bad tick (noise) must not close the call; it takes direction_check_fast_confirms in a row."""
+    from tbrain.brain.features import FeatureTracker
+    eng = SignalEngine(EngineConfig(t1_direction_check=True), store_dir=None, log=lambda *a: None)
+    ctx = T._ctx()
+    tr = FeatureTracker()
+    t0 = T.NOW_MS / 1000 - 1200
+    for i in range(1201):
+        tr.sample("NIFTY", t0 + i, {"cvd": 100.0 * i, "fut": 25060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
+                                     "pe_oi_near": 5e5 + 300 * i, "ce_oi_near": 5e5 + 100 * i, "straddle": 300.0})
+    (c,) = eng.step(T.NOW_MS, {"NIFTY": ctx}, tr)["calls"]
+    key = c["instrument_key"]
+    ctx2 = dict(ctx, spot=c["u_t1"] + 1)
+    ctx2["quotes"] = dict(ctx["quotes"]); ctx2["quotes"][key] = {"bp1": c["p_t1"], "ap1": c["p_t1"] + 0.2, "ltp": c["p_t1"]}
+    past_hold = T.NOW_MS + 130_000   # past the 120s min-hold gate
+    # one bad tick right at the check, immediately followed by a good one: should NOT close (streak resets)
+    tr.sample("NIFTY", past_hold / 1000, {"cvd": -10_000.0, "fut": 24_900.0})
+    eng.step(past_hold, {"NIFTY": ctx2}, tr)
+    c = eng.calls[c["id"]]
+    assert c["status"] == "t1" and c["t1_check"]["fast_streak"] == 1   # one bad tick logged, not closed yet
+    tr.sample("NIFTY", past_hold / 1000 + 1, {"cvd": 100_000.0, "fut": 25_200.0})   # flow recovers
+    eng.step(past_hold + 1000, {"NIFTY": ctx2}, tr)
+    c = eng.calls[c["id"]]
+    assert c["status"] == "t1" and c["t1_check"]["fast_streak"] == 0   # streak reset: still riding
+
+
+def test_direction_check_fast_layer_exits_after_a_sustained_reversal():
+    """Fast layer: a sustained reversal in order flow (confirmed on consecutive ticks) exits immediately,
+    not waiting minutes for a completed candle or the slow-layer interval."""
     from tbrain.brain.features import FeatureTracker
     eng = SignalEngine(EngineConfig(t1_direction_check=True), store_dir=None, log=lambda *a: None)
     ctx = T._ctx()
@@ -192,35 +241,38 @@ def test_direction_check_fast_layer_exits_on_a_cvd_and_price_reversal_before_any
                                      "pe_oi_near": 5e5 + 300 * i, "ce_oi_near": 5e5 + 100 * i, "straddle": 300.0})
     (c,) = eng.step(T.NOW_MS, {"NIFTY": ctx}, tr)["calls"]
     key = c["instrument_key"]
-    ctx2 = dict(ctx, spot=c["u_entry"] + 5)     # small profit, well before T1/the 5-min slow interval
-    ctx2["quotes"] = dict(ctx["quotes"]); ctx2["quotes"][key] = {"bp1": c["entry"] + 1, "ap1": c["entry"] + 1.2, "ltp": c["entry"] + 1}
-    t1 = T.NOW_MS / 1000 + 10
-    for i in range(1, 61):   # next 60s: CVD and futures price both reverse hard against the long
-        tr.sample("NIFTY", t1 + i, {"cvd": 120_000.0 - 500.0 * i, "fut": 25120.0 - 2.0 * i})
-    eng.step(int(t1 + 60) * 1000, {"NIFTY": ctx2}, tr)
+    ctx2 = dict(ctx, spot=c["u_t1"] + 1)        # well up (past min-R), past T1
+    ctx2["quotes"] = dict(ctx["quotes"]); ctx2["quotes"][key] = {"bp1": c["p_t1"], "ap1": c["p_t1"] + 0.2, "ltp": c["p_t1"]}
+    t1 = T.NOW_MS / 1000 + 125   # past the 120s min-hold gate
+    for i in range(1, 61):      # next 60s: CVD and futures price both reverse hard against the long, repeatedly
+        tr.sample("NIFTY", t1 + i, {"cvd": 120_000.0 - 500.0 * i, "fut": 25120.0 - 5.0 * i})
+    eng.step(int(t1 + 1) * 1000, {"NIFTY": ctx2}, tr)   # 1st bad tick: logged, not closed yet
+    c = eng.calls[c["id"]]
+    assert c["status"] == "t1" and c["t1_check"]["fast_streak"] == 1
+    eng.step(int(t1 + 60) * 1000, {"NIFTY": ctx2}, tr)  # 2nd bad tick: confirmed, closes now
     c = eng.calls[c["id"]]
     assert c["status"] == "closed" and c["outcome"] == "EARLY_EXIT" and c["pnl_per_lot"] > 0
     assert c["t1_check"]["fast"]["favorable"] is False
     assert "last_dir_check_ms" not in c   # fired from the FAST layer, well inside the 5-min slow interval
 
 
-def test_direction_check_waits_for_the_interval_before_re_checking():
+def test_direction_check_waits_for_min_hold_then_the_slow_interval():
     eng = SignalEngine(EngineConfig(t1_direction_check=True), store_dir=None, log=lambda *a: None)
     tr = T._tracker()
     ctx = T._ctx()
     (c,) = eng.step(T.NOW_MS, {"NIFTY": ctx}, tr)["calls"]
     key = c["instrument_key"]
-    ctx2 = dict(ctx, spot=c["u_entry"] + 5)     # small profit, still well before T1, still bullish-trending
-    ctx2["quotes"] = dict(ctx["quotes"]); ctx2["quotes"][key] = {"bp1": c["entry"] + 1, "ap1": c["entry"] + 1.2, "ltp": c["entry"] + 1}
-    eng.step(T.NOW_MS + 60_000, {"NIFTY": ctx2}, tr)        # 1 min in: too soon for a check
+    ctx2 = dict(ctx, spot=c["u_t1"] + 1)        # past min-R, still bullish-trending (as at entry)
+    ctx2["quotes"] = dict(ctx["quotes"]); ctx2["quotes"][key] = {"bp1": c["p_t1"], "ap1": c["p_t1"] + 0.2, "ltp": c["p_t1"]}
+    eng.step(T.NOW_MS + 60_000, {"NIFTY": ctx2}, tr)        # 1 min in: inside the 120s min-hold gate
     c = eng.calls[c["id"]]
-    assert "last_dir_check_ms" not in c
-    eng.step(T.NOW_MS + 120_000, {"NIFTY": ctx2}, tr)       # 2 min in: still too soon (interval = 5 min)
+    assert "t1_check" not in c
+    eng.step(T.NOW_MS + 130_000, {"NIFTY": ctx2}, tr)       # past min-hold, but < 5-min slow interval
     c = eng.calls[c["id"]]
-    assert "last_dir_check_ms" not in c
-    eng.step(T.NOW_MS + 300_000, {"NIFTY": ctx2}, tr)       # 5 min in: first check runs
+    assert "last_dir_check_ms" not in c and "t1_check" in c   # fast layer ran (favorable); slow hasn't yet
+    eng.step(T.NOW_MS + 300_000, {"NIFTY": ctx2}, tr)       # 5 min in: slow layer's first check runs
     c = eng.calls[c["id"]]
-    assert c.get("last_dir_check_ms") == T.NOW_MS + 300_000 and c["status"] == "open"  # still bullish: unchanged
+    assert c.get("last_dir_check_ms") == T.NOW_MS + 300_000 and c["status"] == "t1"  # still bullish: unchanged
 
 
 def test_regime_layer_shows_labelling_with_current_reading():

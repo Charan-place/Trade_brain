@@ -70,7 +70,11 @@ class EngineConfig:
     correlation_block: bool = False   # block (not just flag) a same-direction call when the other index already has one open
     t1_direction_check: bool = False  # while in profit: exit now instead of riding if order flow or trend/VWAP flip
     direction_check_interval_min: int = 5   # slow layer (trend/VWAP/candles): re-run at most once every N minutes
-    fast_check_window_s: int = 60           # fast layer (CVD/big prints): lookback window, runs every tick
+    fast_check_window_s: int = 60           # fast layer (CVD/price momentum): lookback window, runs every tick
+    direction_check_min_hold_s: int = 120    # don't even look until the call has been open this long
+    direction_check_min_r: float = 0.3      # ...and is up at least this many R (noise filter, not "any profit")
+    direction_check_fast_confirms: int = 2  # fast layer must read "against" this many ticks IN A ROW to close
+    direction_check_fast_min_move: float = 2.0  # futures must move at least this many points against us (not just <0)
     # ---- shadows ----
     shadows: bool = True
     range_fade_shadow: bool = True
@@ -479,17 +483,18 @@ class SignalEngine:
         return {"favorable": favorable, "vwap_ok": vwap_ok, "trend_ok": trend_ok, "tighter_ok": tighter_ok}
 
     def _direction_favorable_fast(self, c: dict, ctx: dict, tr) -> dict:
-        """Fast layer (every tick while in profit): tick-level order flow (CVD over a short window), same idea as
-        the entry 'aggression' clue but short enough to catch a reversal before it shows up in a completed
-        1-min candle. Options move every tick; by the time the slow layer notices, a block-print reversal can
-        already have given the profit back.
+        """Fast layer (every tick while in profit, once past the min-hold/min-R gate): tick-level order flow
+        (CVD + futures price over a short window), same idea as the entry 'aggression' clue but short enough to
+        catch a reversal before it shows up in a completed 1-min candle. A HARD flip only: the futures move must
+        exceed `direction_check_fast_min_move` points against us, and CVD must also be negative - a flat/near-zero
+        reading (normal noise inside a trend) does not count as 'against'.
         """
         cfg, d, und = self.cfg, c["dir"], c["und"]
         cvd_fast = tr.delta(und, "cvd", cfg.fast_check_window_s)
         px_fast = tr.delta(und, "fut", cfg.fast_check_window_s)
         cvd_ok = cvd_fast is None or d * cvd_fast >= 0
-        px_ok = px_fast is None or d * px_fast >= 0
-        favorable = cvd_ok and px_ok
+        px_ok = px_fast is None or d * px_fast >= -cfg.direction_check_fast_min_move
+        favorable = cvd_ok or px_ok   # only "against" when BOTH a real price move AND CVD have flipped
         return {"favorable": favorable, "cvd_ok": cvd_ok, "px_ok": px_ok}
 
     def _direction_favorable(self, c: dict, ctx: dict, tr, now_ms: float, run_slow: bool) -> dict:
@@ -497,7 +502,11 @@ class SignalEngine:
         slow = c.get("t1_check_slow", {"favorable": True}) if not run_slow else self._direction_favorable_slow(c, ctx)
         if run_slow:
             c["t1_check_slow"] = slow
-        return {"favorable": fast["favorable"] and slow["favorable"], "fast": fast, "slow": slow}
+        fast_streak = c.get("fast_against_streak", 0) + 1 if not fast["favorable"] else 0
+        c["fast_against_streak"] = fast_streak
+        fast_confirmed_against = fast_streak >= self.cfg.direction_check_fast_confirms
+        return {"favorable": not fast_confirmed_against and slow["favorable"], "fast": fast, "slow": slow,
+                "fast_streak": fast_streak}
 
     # ------------------------------------------------------------ tracking
     def _track(self, c: dict, ctx: dict | None, now_ms: float, tr=None) -> None:
@@ -522,14 +531,17 @@ class SignalEngine:
             if (d > 0 and u <= c["u_sl_active"]) or (d < 0 and u >= c["u_sl_active"]):
                 c["stop_via"] = "index"
                 return self._close(c, "BREAKEVEN" if c["t1_hit"] else "SL", now_ms)
-            if c["pnl_per_lot"] > 0 and ctx and tr is not None:
-                interval_ms = self.cfg.direction_check_interval_min * 60_000
+            cfg = self.cfg
+            held_long_enough = now_ms - c["issued_ms"] >= cfg.direction_check_min_hold_s * 1000
+            up_enough = c["risk_per_lot"] > 0 and c["r_now"] >= cfg.direction_check_min_r
+            if held_long_enough and up_enough and ctx and tr is not None:
+                interval_ms = cfg.direction_check_interval_min * 60_000
                 run_slow = now_ms - c.get("last_dir_check_ms", c["issued_ms"]) >= interval_ms
                 if run_slow:
                     c["last_dir_check_ms"] = now_ms
                 check = self._direction_favorable(c, ctx, tr, now_ms, run_slow)
                 c["t1_check"] = check
-                if self.cfg.t1_direction_check and not check["favorable"]:
+                if cfg.t1_direction_check and not check["favorable"]:
                     c["stop_via"] = "direction_check"
                     return self._close(c, "EARLY_EXIT", now_ms)
             if not c["t1_hit"] and ((d > 0 and u >= c["u_t1"]) or (d < 0 and u <= c["u_t1"])):

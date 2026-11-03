@@ -46,10 +46,13 @@ A completed 1-minute candle **closes above the highest high of the previous 10 c
 - **Entry:** the current **ask** (pessimistic), zone = mid … ask + 0.5 %.
 
 ## 6. Watch and score
-- While the call is in profit, two direction checks run alongside the stops (optional, `t1_direction_check`, off
-  by default; either failing closes the call now and locks the current profit as **EARLY_EXIT**):
-  - **Fast** (every tick): CVD and futures price over the last `fast_check_window_s` (60s) both flip against us -
-    options move every tick, a block-print reversal can give back profit in seconds, well before a candle closes.
+- Once the call has been open ≥ `direction_check_min_hold_s` (120s) AND is up ≥ `direction_check_min_r` (0.3R) -
+  not just "technically positive" - two direction checks run alongside the stops (optional, `t1_direction_check`,
+  off by default; either failing closes the call now and locks the current profit as **EARLY_EXIT**):
+  - **Fast** (every tick): CVD AND futures price over the last `fast_check_window_s` (60s) must BOTH have moved a
+    real amount against us (price past `direction_check_fast_min_move` points, not just < 0), confirmed on
+    `direction_check_fast_confirms` (2) consecutive ticks - options move every tick, so a single bad tick is
+    normal noise inside a healthy trend, not a reversal.
   - **Slow** (every `direction_check_interval_min`, 5 min): still on our side of VWAP, still trending ≥ `trend_k` ×
     ATR, AND at least 1 of the last 2 completed candles still with us - catches a sustained reversal the fast
     layer's short window can miss.
@@ -134,19 +137,30 @@ v2.1 note above for being "too strict"; 9 days of range-regime underperformance 
 - Switches live in `data/live/settings.json` (local) or the Modal Dict (hosted); the brain re-reads them every 15 s.
   Only the owner account can change them; viewers see them read-only.
 
-## Periodic direction check (2026-11-03, backtest pending — off by default)
+## Periodic direction check (2026-11-03, live-tested by accident on 03 Nov — see below)
 Idea: the engine rides every open call blind until SL/breakeven/T1/T2/time-stop, even once it's sitting on real
 profit. Options move every tick, so a single slow (1-min-candle) check isn't enough - a block-print reversal can
 give back the profit before a candle even closes. Added an optional two-speed re-check
 (`t1_direction_check`, dashboard switch, default **off**):
-- **Fast** layer, every tick: CVD and futures price delta over `fast_check_window_s` (60s) - the same idea as the
-  entry "aggression" clue, short enough to catch a reversal in order flow immediately.
+- **Fast** layer, every tick: CVD AND futures price delta over `fast_check_window_s` (60s) must BOTH have moved
+  against us by a real amount, confirmed on `direction_check_fast_confirms` (2) consecutive ticks - the same idea
+  as the entry "aggression" clue, but noise-filtered so a single wobbling tick can't trigger it.
 - **Slow** layer, every `direction_check_interval_min` (5 min): the same MUST filters as entry (VWAP side, 60-min
   trend ≥ `trend_k` × ATR) plus at least 1 of the last 2 completed candles still with us.
-Either layer failing closes the call now and locks the current profit (**EARLY_EXIT**) instead of risking giving
-it all back to breakeven or SL. Both checks always run and are recorded on the call (`t1_check`) even while the
-switch is off, so `tbrain backtest`/the scorecard can tell us whether it would have helped before we ever turn it
-on live.
+Neither layer runs at all until the call has been open ≥ `direction_check_min_hold_s` (120s) AND is up ≥
+`direction_check_min_r` (0.3R) - "up by ₹1" is not a signal, it's noise. Either layer failing (once past that
+gate) closes the call now and locks the current profit (**EARLY_EXIT**). Both checks always run and are recorded
+on the call (`t1_check`) even while the switch is off, so `tbrain backtest`/the scorecard can tell us whether it
+would have helped before we ever turn it on live.
+
+**2026-11-03 incident**: the dashboard switch was manually turned on right after this shipped (along with
+`allow_afternoon` and `dd_stop` also being flipped off-default) - all three reset the next morning. With the
+switch on and NONE of the noise filters above in place yet (first cut: `pnl_per_lot > 0`, fast layer a bare sign
+check, no min-hold, no confirms), 12 of 14 live calls exited as EARLY_EXIT, most within 1-2 minutes of entry for
+₹2-₹200 - the check was firing on ordinary tick-to-tick noise inside otherwise-healthy trends, not real reversals.
+Day finished +951 pnl/lot (12W/2L) but with an average win near noise level, instead of the T1/T2-sized wins the
+filters it was riding past would normally produce. The four guards above (min-hold, min-R, fast-layer magnitude,
+fast-layer confirms) were added in response, before any further live or backtest use.
 
 ## Shadow calls (the learning loop)
 Every candidate that reaches the trigger with enough clues but is **blocked** (trend/VWAP filter, cooldown, open call,
