@@ -46,6 +46,13 @@ A completed 1-minute candle **closes above the highest high of the previous 10 c
 - **Entry:** the current **ask** (pessimistic), zone = mid … ask + 0.5 %.
 
 ## 6. Watch and score
+- While the call is in profit, two direction checks run alongside the stops (optional, `t1_direction_check`, off
+  by default; either failing closes the call now and locks the current profit as **EARLY_EXIT**):
+  - **Fast** (every tick): CVD and futures price over the last `fast_check_window_s` (60s) both flip against us -
+    options move every tick, a block-print reversal can give back profit in seconds, well before a candle closes.
+  - **Slow** (every `direction_check_interval_min`, 5 min): still on our side of VWAP, still trending ≥ `trend_k` ×
+    ATR, AND at least 1 of the last 2 completed candles still with us - catches a sustained reversal the fast
+    layer's short window can miss.
 - Index reaches **T1** → stop moves to **breakeven** (entry level).
 - Then **T2**, **SL/breakeven**, or **30-min time stop** (never later than 15:20) closes the call.
 - P&L per lot = (option **bid** − entry) × lot − estimated costs. R = P&L ÷ risk per lot.
@@ -126,6 +133,20 @@ Also note by regime across the same 9 days: `trend` averaged +1.01R/call, `range
 v2.1 note above for being "too strict"; 9 days of range-regime underperformance is a different kind of evidence).
 - Switches live in `data/live/settings.json` (local) or the Modal Dict (hosted); the brain re-reads them every 15 s.
   Only the owner account can change them; viewers see them read-only.
+
+## Periodic direction check (2026-11-03, backtest pending — off by default)
+Idea: the engine rides every open call blind until SL/breakeven/T1/T2/time-stop, even once it's sitting on real
+profit. Options move every tick, so a single slow (1-min-candle) check isn't enough - a block-print reversal can
+give back the profit before a candle even closes. Added an optional two-speed re-check
+(`t1_direction_check`, dashboard switch, default **off**):
+- **Fast** layer, every tick: CVD and futures price delta over `fast_check_window_s` (60s) - the same idea as the
+  entry "aggression" clue, short enough to catch a reversal in order flow immediately.
+- **Slow** layer, every `direction_check_interval_min` (5 min): the same MUST filters as entry (VWAP side, 60-min
+  trend ≥ `trend_k` × ATR) plus at least 1 of the last 2 completed candles still with us.
+Either layer failing closes the call now and locks the current profit (**EARLY_EXIT**) instead of risking giving
+it all back to breakeven or SL. Both checks always run and are recorded on the call (`t1_check`) even while the
+switch is off, so `tbrain backtest`/the scorecard can tell us whether it would have helped before we ever turn it
+on live.
 
 ## Shadow calls (the learning loop)
 Every candidate that reaches the trigger with enough clues but is **blocked** (trend/VWAP filter, cooldown, open call,

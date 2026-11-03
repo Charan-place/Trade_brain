@@ -1,8 +1,9 @@
 """Dashboard switches the brain picks up while running (no restart, no redeploy).
 
 Only whitelisted booleans are stored (see SignalEngine.RUNTIME_KEYS):
-  allow_afternoon  - keep issuing calls after the 13:00 cutoff (default off)
-  dd_stop          - drawdown stop on today's closed calls (default on)
+  allow_afternoon     - keep issuing calls after the 12:00 cutoff (default off)
+  dd_stop             - drawdown stop on today's closed calls (default on)
+  t1_direction_check  - at T1, exit now instead of riding if trend/VWAP or last 2 candles flip (default off)
 Local:  data/live/settings.json.   Modal: the shared modal.Dict (key "settings").
 """
 from __future__ import annotations
@@ -13,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-ALLOWED = ("allow_afternoon", "dd_stop")
+ALLOWED = ("allow_afternoon", "dd_stop", "t1_direction_check")
 
 
 def clean(d: dict | None) -> dict:

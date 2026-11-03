@@ -68,6 +68,9 @@ class EngineConfig:
     dd_peak_r: float = 2.0
     dd_giveback_r: float = 2.0
     correlation_block: bool = False   # block (not just flag) a same-direction call when the other index already has one open
+    t1_direction_check: bool = False  # while in profit: exit now instead of riding if order flow or trend/VWAP flip
+    direction_check_interval_min: int = 5   # slow layer (trend/VWAP/candles): re-run at most once every N minutes
+    fast_check_window_s: int = 60           # fast layer (CVD/big prints): lookback window, runs every tick
     # ---- shadows ----
     shadows: bool = True
     range_fade_shadow: bool = True
@@ -164,7 +167,7 @@ class SignalEngine:
         for book in (self.calls, self.shadows):
             for c in list(book.values()):
                 if c["status"] in ("open", "t1"):
-                    self._track(c, ctxs.get(c["und"]), now_ms)
+                    self._track(c, ctxs.get(c["und"]), now_ms, tracker)
         for und, ctx in ctxs.items():
             try:
                 self.diag[und] = self._evaluate(und, ctx, tracker, now_ms)
@@ -450,8 +453,54 @@ class SignalEngine:
             "last_bid": bid, "pnl_per_lot": -cfg.cost_per_lot_inr, "r_now": 0.0, "mfe": 0.0, "mae": 0.0,
         }, None
 
+    # ------------------------------------------------------------ direction re-check (while in profit)
+    def _direction_favorable_slow(self, c: dict, ctx: dict) -> dict:
+        """Slow layer (re-run every `direction_check_interval_min`): same MUST filters as entry.
+          * futures still on our side of VWAP.
+          * 60-min trend still >= trend_k x ATR.
+          * tighter: of the last 2 COMPLETED 1-min candles, at least 1 must still close with our direction.
+        This reacts to a sustained reversal, not a single print - too slow on its own for options that can
+        swing on one block trade, hence the fast layer below.
+        """
+        cfg, d = self.cfg, c["dir"]
+        fut, vwap = ctx.get("fut"), ctx.get("vwap")
+        vwap_ok = fut is None or vwap is None or d * (fut - vwap) > 0
+        bars = (ctx.get("bars") or [])[-cfg.trend_bars:]
+        trend_ok = True
+        if cfg.trend_k is not None and len(bars) >= 15:
+            trs = [max(b[2] - b[3], abs(b[2] - p[4]), abs(b[3] - p[4])) for p, b in zip(bars[:-1], bars[1:])]
+            atr = sum(trs) / len(trs) if trs else None
+            move = bars[-1][4] - bars[0][4]
+            need = cfg.trend_k * atr if atr else None
+            trend_ok = need is None or d * move >= need
+        last2 = bars[-2:]
+        tighter_ok = not last2 or any(d * (b[4] - b[1]) > 0 for b in last2)
+        favorable = vwap_ok and trend_ok and tighter_ok
+        return {"favorable": favorable, "vwap_ok": vwap_ok, "trend_ok": trend_ok, "tighter_ok": tighter_ok}
+
+    def _direction_favorable_fast(self, c: dict, ctx: dict, tr) -> dict:
+        """Fast layer (every tick while in profit): tick-level order flow (CVD over a short window), same idea as
+        the entry 'aggression' clue but short enough to catch a reversal before it shows up in a completed
+        1-min candle. Options move every tick; by the time the slow layer notices, a block-print reversal can
+        already have given the profit back.
+        """
+        cfg, d, und = self.cfg, c["dir"], c["und"]
+        cvd_fast = tr.delta(und, "cvd", cfg.fast_check_window_s)
+        px_fast = tr.delta(und, "fut", cfg.fast_check_window_s)
+        cvd_ok = cvd_fast is None or d * cvd_fast >= 0
+        px_ok = px_fast is None or d * px_fast >= 0
+        favorable = cvd_ok and px_ok
+        return {"favorable": favorable, "cvd_ok": cvd_ok, "px_ok": px_ok}
+
+    def _direction_favorable(self, c: dict, ctx: dict, tr, now_ms: float, run_slow: bool) -> dict:
+        fast = self._direction_favorable_fast(c, ctx, tr)
+        slow = c.get("t1_check_slow", {"favorable": True}) if not run_slow else self._direction_favorable_slow(c, ctx)
+        if run_slow:
+            c["t1_check_slow"] = slow
+        return {"favorable": fast["favorable"] and slow["favorable"], "fast": fast, "slow": slow}
+
     # ------------------------------------------------------------ tracking
-    def _track(self, c: dict, ctx: dict | None, now_ms: float) -> None:
+    def _track(self, c: dict, ctx: dict | None, now_ms: float, tr=None) -> None:
         q = ((ctx or {}).get("quotes") or {}).get(c["instrument_key"], {})
         u = (ctx or {}).get("spot")
         bid = q.get("bp1") or q.get("ltp")
@@ -473,6 +522,16 @@ class SignalEngine:
             if (d > 0 and u <= c["u_sl_active"]) or (d < 0 and u >= c["u_sl_active"]):
                 c["stop_via"] = "index"
                 return self._close(c, "BREAKEVEN" if c["t1_hit"] else "SL", now_ms)
+            if c["pnl_per_lot"] > 0 and ctx and tr is not None:
+                interval_ms = self.cfg.direction_check_interval_min * 60_000
+                run_slow = now_ms - c.get("last_dir_check_ms", c["issued_ms"]) >= interval_ms
+                if run_slow:
+                    c["last_dir_check_ms"] = now_ms
+                check = self._direction_favorable(c, ctx, tr, now_ms, run_slow)
+                c["t1_check"] = check
+                if self.cfg.t1_direction_check and not check["favorable"]:
+                    c["stop_via"] = "direction_check"
+                    return self._close(c, "EARLY_EXIT", now_ms)
             if not c["t1_hit"] and ((d > 0 and u >= c["u_t1"]) or (d < 0 and u <= c["u_t1"])):
                 c["t1_hit"], c["status"], c["t1_ms"], c["t1_bid"] = True, "t1", now_ms, c.get("last_bid")
                 c["u_sl_active"] = c["u_entry"]
@@ -500,7 +559,8 @@ class SignalEngine:
             return {"calls": len(self.calls), "closed": 0, "hit_t1": None, "avg_r": None, "total_pnl_per_lot": None}
         return {"calls": len(self.calls), "closed": n, "hit_t1": sum(c["t1_hit"] for c in closed) / n,
                 "avg_r": sum(c["r_now"] for c in closed) / n, "total_pnl_per_lot": sum(c["pnl_per_lot"] for c in closed),
-                "by_outcome": {o: sum(1 for c in closed if c["outcome"] == o) for o in ("T2", "BREAKEVEN", "SL", "TIME")}}
+                "by_outcome": {o: sum(1 for c in closed if c["outcome"] == o)
+                               for o in ("T2", "BREAKEVEN", "SL", "TIME", "EARLY_EXIT")}}
 
     def realized_path(self, now_ms: float) -> tuple[float, float]:
         """(peak, current) cumulative R of today's REAL calls that had closed by now_ms, in exit order."""
@@ -514,7 +574,7 @@ class SignalEngine:
             peak = max(peak, cum)
         return peak, cum
 
-    RUNTIME_KEYS = ("allow_afternoon", "dd_stop")
+    RUNTIME_KEYS = ("allow_afternoon", "dd_stop", "t1_direction_check")
 
     def apply_settings(self, settings: dict | None) -> dict:
         """Runtime switches from the dashboard (only whitelisted booleans). Returns what changed."""
@@ -591,4 +651,5 @@ class SignalEngine:
                           "time_stop_min": self.cfg.time_stop_min, "cost_per_lot_inr": self.cfg.cost_per_lot_inr,
                           "afternoon_cutoff": self.cfg.afternoon_cutoff.strftime("%H:%M") if self.cfg.afternoon_cutoff else None,
                           "allow_afternoon": self.cfg.allow_afternoon, "dd_stop": self.cfg.dd_stop,
-                          "dd_peak_r": self.cfg.dd_peak_r, "dd_giveback_r": self.cfg.dd_giveback_r}}
+                          "dd_peak_r": self.cfg.dd_peak_r, "dd_giveback_r": self.cfg.dd_giveback_r,
+                          "t1_direction_check": self.cfg.t1_direction_check}}

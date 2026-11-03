@@ -32,6 +32,7 @@ PRESETS: dict[str, dict] = {
     "v2.1+regime": dict(regime_gate=True, **_NO_SESSION_RULES),
     "v2.2": dict(),                                     # current defaults: v2.1 + 12:00 cutoff + drawdown stop
     "v2.2+afternoon": dict(allow_afternoon=True),       # v2.2 with the afternoon switch ON
+    "v2.2+t1check": dict(t1_direction_check=True),      # v2.2 with the periodic in-profit direction check ON
 }
 
 

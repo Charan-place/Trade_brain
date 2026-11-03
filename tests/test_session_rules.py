@@ -86,6 +86,7 @@ def test_rules_block_reports_switch_state():
     eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
     r = _step(eng, _at(10, 30))["rules"]
     assert r["afternoon_cutoff"] == "12:00" and r["allow_afternoon"] is False and r["dd_stop"] is True
+    assert r["t1_direction_check"] is False
 
 
 @pytest.mark.parametrize("store_factory", [lambda tmp: FileSettings(tmp / "live" / "settings.json"),
@@ -130,6 +131,96 @@ def test_local_ui_settings_endpoint_with_csrf_guards(tmp_path):
         assert st.get() == {"allow_afternoon": True}
     finally:
         srv.stop()
+
+
+def test_direction_check_off_by_default_rides_to_breakeven_like_before():
+    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    tr = T._tracker()
+    ctx = T._ctx()
+    (c,) = eng.step(T.NOW_MS, {"NIFTY": ctx}, tr)["calls"]
+    key = c["instrument_key"]
+    ctx2 = dict(ctx, spot=c["u_t1"] + 1, vwap=ctx["fut"] + 50)      # flip VWAP against the trade too
+    ctx2["bars"] = [[b[0], b[1], b[2], b[3], b[1] - 1, 0] for b in ctx["bars"]]  # red candles (against a long)
+    ctx2["quotes"] = dict(ctx["quotes"]); ctx2["quotes"][key] = {"bp1": c["p_t1"], "ap1": c["p_t1"] + 0.2, "ltp": c["p_t1"]}
+    eng.step(T.NOW_MS + 300_000, {"NIFTY": ctx2}, tr)
+    c = eng.calls[c["id"]]
+    assert c["status"] == "t1" and c["t1_hit"] and c["u_sl_active"] == c["u_entry"]  # unchanged: flag is off
+    assert c["t1_check"]["favorable"] is False                                       # but we DID compute it (shadow data)
+    assert c["t1_check"]["slow"]["favorable"] is False
+
+
+def test_direction_check_on_exits_now_when_trend_and_candles_flip():
+    eng = SignalEngine(EngineConfig(t1_direction_check=True), store_dir=None, log=lambda *a: None)
+    tr = T._tracker()
+    ctx = T._ctx()
+    (c,) = eng.step(T.NOW_MS, {"NIFTY": ctx}, tr)["calls"]
+    key = c["instrument_key"]
+    ctx2 = dict(ctx, spot=c["u_t1"] + 1, vwap=ctx["fut"] + 50)      # futures now BELOW vwap: against a long
+    ctx2["bars"] = [[b[0], b[1], b[2], b[3], b[1] - 1, 0] for b in ctx["bars"]]  # last 2 candles red
+    ctx2["quotes"] = dict(ctx["quotes"]); ctx2["quotes"][key] = {"bp1": c["p_t1"], "ap1": c["p_t1"] + 0.2, "ltp": c["p_t1"]}
+    eng.step(T.NOW_MS + 300_000, {"NIFTY": ctx2}, tr)
+    c = eng.calls[c["id"]]
+    assert c["status"] == "closed" and c["outcome"] == "EARLY_EXIT" and c["pnl_per_lot"] > 0  # locked profit early
+    assert c["t1_check"]["favorable"] is False
+    assert c["t1_check"]["slow"]["vwap_ok"] is False and c["t1_check"]["slow"]["tighter_ok"] is False
+
+
+def test_direction_check_on_still_rides_when_trend_holds():
+    eng = SignalEngine(EngineConfig(t1_direction_check=True), store_dir=None, log=lambda *a: None)
+    tr = T._tracker()
+    ctx = T._ctx()
+    (c,) = eng.step(T.NOW_MS, {"NIFTY": ctx}, tr)["calls"]
+    key = c["instrument_key"]
+    ctx2 = dict(ctx, spot=c["u_t1"] + 1)        # bars/fut/vwap unchanged: still bullish-trending (as at entry)
+    ctx2["quotes"] = dict(ctx["quotes"]); ctx2["quotes"][key] = {"bp1": c["p_t1"], "ap1": c["p_t1"] + 0.2, "ltp": c["p_t1"]}
+    eng.step(T.NOW_MS + 300_000, {"NIFTY": ctx2}, tr)
+    c = eng.calls[c["id"]]
+    assert c["status"] == "t1" and c["t1_hit"] and c["u_sl_active"] == c["u_entry"]
+    assert c["t1_check"]["favorable"] is True
+
+
+def test_direction_check_fast_layer_exits_on_a_cvd_and_price_reversal_before_any_candle_closes():
+    """Fast layer: a sharp reversal in order flow should exit on the VERY NEXT tick, not wait minutes for
+    a completed candle or the slow-layer interval - options can give back profit in seconds."""
+    from tbrain.brain.features import FeatureTracker
+    eng = SignalEngine(EngineConfig(t1_direction_check=True), store_dir=None, log=lambda *a: None)
+    ctx = T._ctx()
+    tr = FeatureTracker()
+    t0 = T.NOW_MS / 1000 - 1200
+    for i in range(1201):   # same build-up as T._tracker(): rising CVD/fut up to issue time
+        tr.sample("NIFTY", t0 + i, {"cvd": 100.0 * i, "fut": 25060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
+                                     "pe_oi_near": 5e5 + 300 * i, "ce_oi_near": 5e5 + 100 * i, "straddle": 300.0})
+    (c,) = eng.step(T.NOW_MS, {"NIFTY": ctx}, tr)["calls"]
+    key = c["instrument_key"]
+    ctx2 = dict(ctx, spot=c["u_entry"] + 5)     # small profit, well before T1/the 5-min slow interval
+    ctx2["quotes"] = dict(ctx["quotes"]); ctx2["quotes"][key] = {"bp1": c["entry"] + 1, "ap1": c["entry"] + 1.2, "ltp": c["entry"] + 1}
+    t1 = T.NOW_MS / 1000 + 10
+    for i in range(1, 61):   # next 60s: CVD and futures price both reverse hard against the long
+        tr.sample("NIFTY", t1 + i, {"cvd": 120_000.0 - 500.0 * i, "fut": 25120.0 - 2.0 * i})
+    eng.step(int(t1 + 60) * 1000, {"NIFTY": ctx2}, tr)
+    c = eng.calls[c["id"]]
+    assert c["status"] == "closed" and c["outcome"] == "EARLY_EXIT" and c["pnl_per_lot"] > 0
+    assert c["t1_check"]["fast"]["favorable"] is False
+    assert "last_dir_check_ms" not in c   # fired from the FAST layer, well inside the 5-min slow interval
+
+
+def test_direction_check_waits_for_the_interval_before_re_checking():
+    eng = SignalEngine(EngineConfig(t1_direction_check=True), store_dir=None, log=lambda *a: None)
+    tr = T._tracker()
+    ctx = T._ctx()
+    (c,) = eng.step(T.NOW_MS, {"NIFTY": ctx}, tr)["calls"]
+    key = c["instrument_key"]
+    ctx2 = dict(ctx, spot=c["u_entry"] + 5)     # small profit, still well before T1, still bullish-trending
+    ctx2["quotes"] = dict(ctx["quotes"]); ctx2["quotes"][key] = {"bp1": c["entry"] + 1, "ap1": c["entry"] + 1.2, "ltp": c["entry"] + 1}
+    eng.step(T.NOW_MS + 60_000, {"NIFTY": ctx2}, tr)        # 1 min in: too soon for a check
+    c = eng.calls[c["id"]]
+    assert "last_dir_check_ms" not in c
+    eng.step(T.NOW_MS + 120_000, {"NIFTY": ctx2}, tr)       # 2 min in: still too soon (interval = 5 min)
+    c = eng.calls[c["id"]]
+    assert "last_dir_check_ms" not in c
+    eng.step(T.NOW_MS + 300_000, {"NIFTY": ctx2}, tr)       # 5 min in: first check runs
+    c = eng.calls[c["id"]]
+    assert c.get("last_dir_check_ms") == T.NOW_MS + 300_000 and c["status"] == "open"  # still bullish: unchanged
 
 
 def test_regime_layer_shows_labelling_with_current_reading():
