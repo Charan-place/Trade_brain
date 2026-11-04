@@ -75,6 +75,14 @@ class EngineConfig:
     direction_check_min_r: float = 0.3      # ...and is up at least this many R (noise filter, not "any profit")
     direction_check_fast_confirms: int = 2  # fast layer must read "against" this many ticks IN A ROW to close
     direction_check_fast_min_move: float = 2.0  # futures must move at least this many points against us (not just <0)
+    # ---- v2.3 volatility regime filter (10:xx vs 11:xx split, 19 Oct-4 Nov: 10:xx payoff ratio 1.13 vs 11:xx 1.86,
+    # driven by a wider avg SL (34.9 vs 23.7 pts) across those 11 days; NOT a within-day "open decays" pattern --
+    # the 2026-10-19 replay showed that day's ATR peaked AT the open, so a fixed opening-window baseline never
+    # fired. Compares current ATR to a trailing SAME-DAY median instead, catching a spike whenever it happens) ----
+    vol_regime_filter: bool = False   # when current ATR is a spike vs the day's trailing median ATR: tighten stop + raise bar
+    vol_spike_k: float = 1.3          # current atr_1m / trailing median ATR >= this -> "spiking"
+    vol_spike_sl_floor_mult: float = 0.6   # breakout SL floor in spike regime (vs the normal 0.8 x ATR)
+    vol_spike_min_score_bonus: int = 1     # extra clue required (on top of min_score) while the regime is spiking
     # ---- shadows ----
     shadows: bool = True
     range_fade_shadow: bool = True
@@ -82,6 +90,23 @@ class EngineConfig:
 
 def _fmt(x: float | None, d: int = 2) -> str:
     return "—" if x is None else f"{x:,.{d}f}"
+
+
+def _baseline_atr(all_bars: list, exclude_last: int = 5) -> float | None:
+    """Trailing same-day MEDIAN true range, excluding the most recent `exclude_last` bars (so a live spike
+    doesn't inflate its own baseline). Median, not mean, so one earlier spike doesn't mask a new one.
+    A fixed opening window (e.g. first 30 min) assumes volatility always decays after the open; that's false
+    on days where the open IS the day's calmest stretch and a later window spikes instead (confirmed on the
+    2026-10-19 replay: the open had the day's highest ATR, so an opening-relative ratio never exceeded 1.0)."""
+    hist = all_bars[:-exclude_last] if len(all_bars) > exclude_last else []
+    if len(hist) < 15:
+        return None
+    trs = [max(b[2] - b[3], abs(b[2] - p[4]), abs(b[3] - p[4])) for p, b in zip(hist[:-1], hist[1:])]
+    if not trs:
+        return None
+    trs.sort()
+    n = len(trs)
+    return trs[n // 2] if n % 2 else 0.5 * (trs[n // 2 - 1] + trs[n // 2])
 
 
 def regime_of(bars: list, atr: float | None, vwap_crosses: int | None, cfg: EngineConfig) -> dict:
@@ -235,6 +260,11 @@ class SignalEngine:
         if cfg.regime_gate and regime["label"] != "trend":
             gates.append(f"regime gate: market is '{regime['label']}' (breakouts only in trend)")
 
+        baseline_atr = _baseline_atr(all_bars)
+        vol_ratio = atr / baseline_atr if (atr and baseline_atr) else None
+        vol_spiking = cfg.vol_regime_filter and vol_ratio is not None and vol_ratio >= cfg.vol_spike_k
+        min_score_needed = cfg.min_score + (cfg.vol_spike_min_score_bonus if vol_spiking else 0)
+
         sides = {}
         for d, name in ((1, "bullish"), (-1, "bearish")):
             conds = []
@@ -281,19 +311,21 @@ class SignalEngine:
                            "required": required, "required_ok": all(r["ok"] for r in required)}
 
         out = {"evaluated_at": now.isoformat(), "gates": gates, "sides": sides, "min_score": cfg.min_score,
-               "atr_1m": atr, "hh10": hh, "ll10": ll, "blocked": None, "regime": regime}
+               "atr_1m": atr, "hh10": hh, "ll10": ll, "blocked": None, "regime": regime,
+               "vol_ratio": vol_ratio, "vol_spiking": vol_spiking, "min_score_needed": min_score_needed}
         data_blocked = any(g.startswith(DATA_GATES) for g in gates)
         if not bars or data_blocked:
             return out
         bar_id = int(bars[-1][0])
+        sl_mult = cfg.vol_spike_sl_floor_mult if vol_spiking else 0.8
 
         # ---------------- breakout playbook ----------------
-        cands = [s for s in sides.values() if s["trigger"] and s["score"] >= cfg.min_score]
+        cands = [s for s in sides.values() if s["trigger"] and s["score"] >= min_score_needed]
         if cands:
             best = max(cands, key=lambda s: (s["required_ok"], s["score"]))
             blockers = list(gates) + [r["text"].replace("MUST: ", "") for r in best["required"] if not r["ok"]]
             if not blockers and self._issued_bar.get(und) != bar_id:
-                call, why = self._build(und, ctx, best, self._breakout_levels(spot, best["dir"], atr, bars),
+                call, why = self._build(und, ctx, best, self._breakout_levels(spot, best["dir"], atr, bars, sl_mult),
                                         now, now_ms, "breakout", regime, enforce=True)
                 if call is not None:
                     self._issued_bar[und] = bar_id
@@ -306,7 +338,7 @@ class SignalEngine:
                 blockers.append(why)
             if blockers:
                 out["blocked"] = "; ".join(b for b in blockers if b)
-                self._shadow(und, ctx, best, self._breakout_levels(spot, best["dir"], atr, bars), now, now_ms,
+                self._shadow(und, ctx, best, self._breakout_levels(spot, best["dir"], atr, bars, sl_mult), now, now_ms,
                              "breakout", regime, blockers, bar_id)
         elif any(s["trigger"] for s in sides.values()):
             pass  # trigger without enough clues: not a candidate (keeps shadow volume meaningful)
@@ -335,14 +367,14 @@ class SignalEngine:
         return out
 
     @staticmethod
-    def _breakout_levels(spot, d, atr, bars):
+    def _breakout_levels(spot, d, atr, bars, sl_floor_mult=0.8):
         if not spot or not atr or len(bars) < 5:
             return (None, None, None, "no spot/ATR")
         recent = bars[-5:]
         sl_u = (min(b[3] for b in recent) - 0.1 * atr) if d > 0 else (max(b[2] for b in recent) + 0.1 * atr)
         risk_u = abs(spot - sl_u)
-        if risk_u < 0.8 * atr:
-            sl_u, risk_u = spot - d * 0.8 * atr, 0.8 * atr
+        if risk_u < sl_floor_mult * atr:
+            sl_u, risk_u = spot - d * sl_floor_mult * atr, sl_floor_mult * atr
         if risk_u > 3 * atr:
             return (None, None, None, f"stop too wide ({risk_u:.1f} pts > 3x ATR)")
         return (sl_u, spot + d * 2.0 * risk_u, spot + d * 3.0 * risk_u, None)
@@ -586,7 +618,7 @@ class SignalEngine:
             peak = max(peak, cum)
         return peak, cum
 
-    RUNTIME_KEYS = ("allow_afternoon", "dd_stop", "t1_direction_check")
+    RUNTIME_KEYS = ("allow_afternoon", "dd_stop", "t1_direction_check", "vol_regime_filter")
 
     def apply_settings(self, settings: dict | None) -> dict:
         """Runtime switches from the dashboard (only whitelisted booleans). Returns what changed."""
@@ -664,4 +696,5 @@ class SignalEngine:
                           "afternoon_cutoff": self.cfg.afternoon_cutoff.strftime("%H:%M") if self.cfg.afternoon_cutoff else None,
                           "allow_afternoon": self.cfg.allow_afternoon, "dd_stop": self.cfg.dd_stop,
                           "dd_peak_r": self.cfg.dd_peak_r, "dd_giveback_r": self.cfg.dd_giveback_r,
-                          "t1_direction_check": self.cfg.t1_direction_check}}
+                          "t1_direction_check": self.cfg.t1_direction_check,
+                          "vol_regime_filter": self.cfg.vol_regime_filter, "vol_spike_k": self.cfg.vol_spike_k}}

@@ -212,6 +212,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     <button class="alertbtn" id="sw-afternoon" aria-pressed="false" data-key="allow_afternoon" title="After 12:00 the brain stops issuing NEW calls (9 live days 19-30 Oct: 12:00-13:59 pnl -9,316, 14:00+ pnl -7,924). Turn on to keep getting calls until 14:45. Blocked calls are still tracked as shadows.">🌇 Afternoon calls: off</button>
     <button class="alertbtn" id="sw-dd" aria-pressed="true" data-key="dd_stop" title="Drawdown stop: once today's closed calls have been +2R or more and then give back 2R, no new calls for the rest of the day. Blocked calls are still tracked as shadows.">🛑 Drawdown stop: on</button>
     <button class="alertbtn" id="sw-t1check" aria-pressed="false" data-key="t1_direction_check" title="At T1: re-check trend/VWAP and the last 2 candles. If the move is turning against the trade, exit now and lock the T1-level profit instead of riding to breakeven/T2. Off by default while we collect evidence.">🎯 T1 direction check: off</button>
+    <button class="alertbtn" id="sw-volregime" aria-pressed="false" data-key="vol_regime_filter" title="When local ATR spikes >=1.3x the day's trailing median ATR, tighten the SL floor and require one extra clue before entering (10:xx vs 11:xx, 19 Oct-4 Nov: payoff ratio 1.13 vs 1.86, driven by a wider avg SL across those days). Off by default while we collect evidence.">📉 Vol regime filter: off</button>
     <button class="alertbtn" id="alerts" aria-pressed="false" title="Sound + desktop notification on new calls, T1, SL">🔕 Alerts off</button>
     </div>
     <button class="themebtn" id="theme" title="Toggle theme">◐ theme</button>
@@ -962,7 +963,8 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
   // ---------- rule switches (saved on the server; the brain applies them within ~15 s) ----------
   let ruleSettings = {}, ruleCanEdit = false;
   const SW = {allow_afternoon: ["sw-afternoon", "🌇 Afternoon calls", false], dd_stop: ["sw-dd", "🛑 Drawdown stop", true],
-              t1_direction_check: ["sw-t1check", "🎯 T1 direction check", false]};
+              t1_direction_check: ["sw-t1check", "🎯 T1 direction check", false],
+              vol_regime_filter: ["sw-volregime", "📉 Vol regime filter", false]};
   function paintSwitches(live) {
     for (const [key, [id, label, dflt]] of Object.entries(SW)) {
       const b = $(id); if (!b) continue;

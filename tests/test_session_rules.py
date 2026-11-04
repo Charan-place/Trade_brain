@@ -275,6 +275,51 @@ def test_direction_check_waits_for_min_hold_then_the_slow_interval():
     assert c.get("last_dir_check_ms") == T.NOW_MS + 300_000 and c["status"] == "t1"  # still bullish: unchanged
 
 
+def _spiky_ctx(spot=25100.0):
+    """30 calm 1-min bars (the trailing-median baseline) + 5 wide-range bars at the end (ATR spiking),
+    still trending up so the breakout trigger and 60-min trend MUST filter both hold."""
+    ch, quotes = T._chain(int(spot), 7 / 365, True)
+    bars = []
+    base = T.NOW_MS - 35 * 60_000
+    p = spot - 80
+    for i in range(30):
+        o = p; c = p + 2; bars.append([base + i * 60_000, o, c + 3, o - 3, c, 0]); p = c
+    for i in range(30, 35):
+        o = p; c = p + 4; bars.append([base + i * 60_000, o, c + 10, o - 10, c, 0]); p = c
+    return {"live": True, "feed_age": 0.4, "spot": p, "fut": p + 20, "vwap": p - 10,
+            "flow": {"obi": 0.3, "resting_imbalance": 0.2}, "big_net": 6500.0,
+            "big_tape": [{"t_ms": T.NOW_MS - 60_000, "symbol": "NIFTY FUT 27 OCT 26", "side": "BUY", "qty": 3250,
+                          "lots": 50, "px": p + 18, "bullish": True}],
+            "bars": bars, "chains": {"2026-10-27": ch}, "lot": T.LOT, "r": T.R, "quotes": quotes}
+
+
+def test_vol_regime_filter_off_by_default_ignores_the_spike():
+    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    out = eng.step(T.NOW_MS, {"NIFTY": _spiky_ctx()}, T._tracker())
+    d = out["diagnostics"]["NIFTY"]
+    assert d["vol_ratio"] is not None and d["vol_ratio"] > 1.3   # the spike is real...
+    assert d["vol_spiking"] is False and d["min_score_needed"] == eng.cfg.min_score   # ...but the switch is off
+
+
+def test_vol_regime_filter_on_detects_the_spike_and_raises_the_bar():
+    eng = SignalEngine(EngineConfig(vol_regime_filter=True), store_dir=None, log=lambda *a: None)
+    out = eng.step(T.NOW_MS, {"NIFTY": _spiky_ctx()}, T._tracker())
+    d = out["diagnostics"]["NIFTY"]
+    assert d["vol_spiking"] is True
+    assert d["min_score_needed"] == eng.cfg.min_score + eng.cfg.vol_spike_min_score_bonus
+
+
+def test_vol_regime_filter_tightens_the_sl_floor_when_a_call_still_clears_the_bar():
+    base_eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    base_out = base_eng.step(T.NOW_MS, {"NIFTY": _spiky_ctx()}, T._tracker())
+    spike_eng = SignalEngine(EngineConfig(vol_regime_filter=True, min_score=0), store_dir=None, log=lambda *a: None)
+    spike_out = spike_eng.step(T.NOW_MS, {"NIFTY": _spiky_ctx()}, T._tracker())
+    if base_out["calls"] and spike_out["calls"]:
+        base_risk = abs(base_out["calls"][0]["u_entry"] - base_out["calls"][0]["u_sl"])
+        spike_risk = abs(spike_out["calls"][0]["u_entry"] - spike_out["calls"][0]["u_sl"])
+        assert spike_risk <= base_risk   # tighter (or equal) SL floor in the spiking regime
+
+
 def test_regime_layer_shows_labelling_with_current_reading():
     from types import SimpleNamespace
     from tbrain.brain.state import BrainState

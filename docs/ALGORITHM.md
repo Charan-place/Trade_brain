@@ -162,6 +162,33 @@ Day finished +951 pnl/lot (12W/2L) but with an average win near noise level, ins
 filters it was riding past would normally produce. The four guards above (min-hold, min-R, fast-layer magnitude,
 fast-layer confirms) were added in response, before any further live or backtest use.
 
+## Volatility regime filter (2026-11-05, from a Mongo segmentation of 155 live calls across 19 Oct-4 Nov)
+Idea: segmenting live calls by hour of day showed 10:xx-11:xx NIFTY/SENSEX calls underperforming badly next to
+11:xx (payoff ratio 1.13 vs 1.86) - not because the 10:xx win rate was much worse, but because the average SL
+distance was ~47% wider (34.9 vs 23.7 pts), so a loss cost more. Clock time was a proxy; the real driver is
+intraday ATR (the engine's existing 14-bar true range average) running hot relative to its own day's baseline.
+Rather than block an hour outright (loses good trades on calm days in that hour), added `vol_regime_filter`
+(dashboard switch, default **off**): when current ATR >= `vol_spike_k` (1.3x) the day's trailing median true
+range (all bars so far, excluding the most recent 5 so a live spike can't inflate its own baseline):
+- the breakout SL floor tightens from `0.8 x ATR` to `vol_spike_sl_floor_mult` (0.6x) - smaller loss if stopped,
+- the entry score bar rises by `vol_spike_min_score_bonus` (1 clue) - needs stronger confluence while it's expensive to be wrong.
+`vol_ratio`/`vol_spiking`/`min_score_needed` are always computed and exposed in diagnostics, same shadow-first
+pattern as every other filter here, so real evidence accumulates before the switch is ever flipped on.
+
+**First design was wrong, caught by backtest**: the original baseline compared current ATR to the day's first
+30 minutes, assuming volatility always decays after the open. Replaying 2026-10-19's real tick data showed that
+assumption is false on that day - the open WAS the day's highest-ATR stretch, so the ratio never exceeded 1.0
+and the filter was dead code in practice. Switched to the trailing-median design above; a trace confirmed it
+then correctly flagged a real spike (SENSEX, 19 Oct 14:57-14:58, ratio up to 1.36).
+
+**Backtest coverage gap (known, as of this writing)**: only 2026-10-19 and 2026-10-23 have the full tick+chain+
+instrument-master cache needed to replay (21 and 22 Oct are missing their instrument-master snapshot, which
+can't be reconstructed after the fact - Upstox only serves the CURRENT master, not a historical one). On both
+usable days, the one real spike the filter caught didn't overlap a live entry, so there is no historical day
+yet proving this filter changes a trade's outcome - only that it's inert and safe when no spike occurs during
+a call. Shipped off-by-default specifically because of this gap; do not turn it on live without more shadow
+evidence or until a backtestable day shows it actually helping.
+
 ## Shadow calls (the learning loop)
 Every candidate that reaches the trigger with enough clues but is **blocked** (trend/VWAP filter, cooldown, open call,
 OI wall, R:R, spread, depth, regime gate, loss pause) is built exactly like a real call and tracked silently to its

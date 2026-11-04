@@ -33,6 +33,7 @@ PRESETS: dict[str, dict] = {
     "v2.2": dict(),                                     # current defaults: v2.1 + 12:00 cutoff + drawdown stop
     "v2.2+afternoon": dict(allow_afternoon=True),       # v2.2 with the afternoon switch ON
     "v2.2+t1check": dict(t1_direction_check=True),      # v2.2 with the periodic in-profit direction check ON
+    "v2.2+volregime": dict(vol_regime_filter=True),     # v2.2 with the ATR-spike SL/score gate ON
 }
 
 
