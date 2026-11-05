@@ -189,6 +189,61 @@ yet proving this filter changes a trade's outcome - only that it's inert and saf
 a call. Shipped off-by-default specifically because of this gap; do not turn it on live without more shadow
 evidence or until a backtestable day shows it actually helping.
 
+## Regime-confirmed breakout gate (2026-11-05, from a 12-day/155-call Mongo segmentation)
+Same segmentation that found the volatility pattern above also split by `regime.label`: "range" regime
+averaged -29.4 pnl/call (43.8% win) vs "trend" +646.9 pnl/call (50% win) - 22x better per trade, over 73 vs
+28 calls respectively. `regime_gate` (dashboard switch, default **off**) already existed in the code from the
+v2.1 era but was rejected after 1 day's sample (7 calls) as "too strict" - that call is now outdated. Re-tested
+with a stricter gate than the original: breakouts only fire once the market has read "trend" for
+`regime_confirm_bars` (3) CONSECUTIVE 1-min bars, not a single reading - ADX/ER-style regime labels are known to
+lag and flicker right at the trend/range boundary, so a single noisy reading shouldn't open or close the gate.
+
+**Backtest on the 2 usable days (19, 23 Oct) is genuinely mixed, not a clean win**: on 19 Oct the 3-bar
+confirmation delayed the day's only trend-regime entry long enough to miss it entirely (0 calls, vs 1 call/
++1,398 with a single-reading gate). On 23 Oct it performed close to the single-reading version (5 calls, 80%
+win, +9,492 vs 4 calls, 100% win, +9,214). With 0-5 trades per variant this is far below any believable signal
+- shipped off-by-default specifically so real evidence (ideally 30+ trades, the commonly cited floor before
+trusting a backtest result) accumulates before this is ever turned on live.
+
+## Real per-trade transaction costs (2026-11-05)
+`cost_per_lot_inr` was a flat ₹40 placeholder (2 x ₹20 brokerage) from the very first version, with its own
+comment admitting statutory charges (STT etc.) were NOT included. STT on options was hiked to 0.125-0.15% of
+premium (charged on the SELL leg) - at a typical ATM premium (~₹150-200) this alone is ~₹15-25/lot, and once
+exchange transaction charges, SEBI fees, stamp duty and GST on brokerage are added, real round-trip cost at
+that premium comes to roughly ₹65-75/lot - nearly double the old flat number. Since `min_rr_net` (the entry
+gate) is computed directly from this cost, understating it meant the gate was quietly more permissive than
+intended; some trades that looked like they cleared 1.5R after "costs" might not have, after real costs.
+Replaced the flat constant with `real_cost_per_lot(entry_px, exit_px, lot)`: STT (sell leg), exchange txn
+charges + SEBI fee (both legs), stamp duty (buy leg), brokerage (both legs), GST on brokerage+exchange - all on
+actual premium turnover, not notional. `cost_per_lot_inr` stays as an optional override (e.g. for a different
+broker's flat-fee plan) but defaults to `None`, which uses the real formula. Backtested on both usable days
+(19, 23 Oct): the real cost model didn't block any of the same calls that fired under the old flat number on
+either day - the shift was a modest, honest reduction in reported pnl (19 Oct: +5,502 -> +5,350; 23 Oct:
++16,306 -> +15,963), not a different set of trades. Confirms the entries weren't on the margin of the R:R gate
+on these 2 days, but the live/backtest numbers going forward are now accurate rather than quietly optimistic.
+
+## Event calendar gate (2026-11-06)
+This engine only ever BUYS premium (CE/PE) - it never sells. On a scheduled high-volatility event (RBI MPC
+decision, Union Budget, US FOMC reaction morning), implied volatility typically runs up pre-announcement and
+crushes after; an option buyer can be right on direction and still lose money to that IV crush. `event_calendar_gate`
+(dashboard switch, default **off**) blocks NEW calls in a window around each known date:
+- RBI MPC: 30 min before to 60 min after the ~10:00 IST announcement.
+- Union Budget: same window around the ~11:00 IST presentation.
+- US FOMC: the entire Indian trading day's entry window the morning after (the overnight move is already
+  priced in by the Indian open, not something a same-day blackout window would catch).
+Dates are hardcoded in `src/tbrain/signals/event_calendar.py` from each body's own official announcement -
+there is no free machine-readable calendar API for any of these (confirmed: RBI's own "Advance Release
+Calendar" covers SDDS data releases, not MPC dates). This needs an annual refresh once the next cycle's dates
+are announced; a stale list silently blocks the wrong day or fails to block the right one.
+Explicitly NOT built: a live news-sentiment feed. Research found the predictive effect is real in academic
+literature but narrow (concentrated in the first hour after specific announcement types, decays within a
+minute) and real institutional use runs on low-latency structured feeds (Bloomberg/Refinitiv) costing
+thousands/month - infrastructure this system doesn't have. A weak retail version would add false confidence,
+not real edge, so it was deliberately not built.
+Backtested on the 2 usable days (19, 23 Oct, neither an event day): exact pnl match to the baseline on both
+(+5,350 / +15,963) - confirms the gate is a true no-op outside a blackout window, as intended. Its real value
+can only be measured on an actual event day, which isn't in the current backtestable tick data.
+
 ## Shadow calls (the learning loop)
 Every candidate that reaches the trigger with enough clues but is **blocked** (trend/VWAP filter, cooldown, open call,
 OI wall, R:R, spread, depth, regime gate, loss pause) is built exactly like a real call and tracked silently to its

@@ -42,8 +42,8 @@ def test_switch_on_allows_afternoon_calls_and_morning_is_unaffected():
 
 def test_apply_settings_whitelists_booleans_only():
     eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
-    assert eng.apply_settings({"min_score": 1, "allow_afternoon": "yes", "regime_gate": True}) == {}
-    assert eng.cfg.min_score == 5 and eng.cfg.allow_afternoon is False and eng.cfg.regime_gate is False
+    assert eng.apply_settings({"min_score": 1, "allow_afternoon": "yes", "trend_k": True}) == {}
+    assert eng.cfg.min_score == 5 and eng.cfg.allow_afternoon is False and eng.cfg.trend_k == 1.5
 
 
 def _nifty(out):
@@ -318,6 +318,67 @@ def test_vol_regime_filter_tightens_the_sl_floor_when_a_call_still_clears_the_ba
         base_risk = abs(base_out["calls"][0]["u_entry"] - base_out["calls"][0]["u_sl"])
         spike_risk = abs(spike_out["calls"][0]["u_entry"] - spike_out["calls"][0]["u_sl"])
         assert spike_risk <= base_risk   # tighter (or equal) SL floor in the spiking regime
+
+
+def _trending_ctx(spot=25100.0, n_bars=25, extra_bars=0):
+    """A clean monotonic uptrend (ER close to 1.0, no VWAP crossings) so regime_of() reads 'trend' every bar -
+    isolates the regime_confirm_bars streak logic from regime_of()'s own classification. `extra_bars` advances
+    the LAST bar's timestamp (so repeated calls look like later ticks, not the same bar replayed)."""
+    ch, quotes = T._chain(int(spot), 7 / 365, True)
+    bars = []
+    total = n_bars + extra_bars
+    base = T.NOW_MS - n_bars * 60_000   # fixed anchor: extra_bars only pushes the END further out
+    p = spot - 2 * total
+    for i in range(total):
+        o = p; c = p + 2; bars.append([base + i * 60_000, o, c + 3, o - 3, c, 0]); p = c
+    return {"live": True, "feed_age": 0.4, "spot": p, "fut": p + 20, "vwap": p - 40, "flow": {"obi": 0.3, "resting_imbalance": 0.2},
+            "big_net": 6500.0, "big_tape": [{"t_ms": T.NOW_MS - 60_000, "symbol": "NIFTY FUT 27 OCT 26", "side": "BUY",
+            "qty": 3250, "lots": 50, "px": p + 18, "bullish": True}],
+            "bars": bars, "chains": {"2026-10-27": ch}, "lot": T.LOT, "r": T.R, "quotes": quotes}
+
+
+def test_event_calendar_gate_blocks_calls_on_a_known_rbi_mpc_day():
+    from tbrain.signals.event_calendar import RBI_MPC_DATES
+    mpc_day = RBI_MPC_DATES[0]
+    now_ms = datetime(mpc_day.year, mpc_day.month, mpc_day.day, 10, 0, tzinfo=IST).timestamp() * 1000
+    old = T.NOW_MS
+    try:
+        T.NOW_MS = now_ms
+        eng = SignalEngine(EngineConfig(event_calendar_gate=True), store_dir=None, log=lambda *a: None)
+        out = eng.step(now_ms, {"NIFTY": T._ctx()}, T._tracker())
+        d = out["diagnostics"]["NIFTY"]
+        assert not out["calls"]
+        assert any("event calendar" in g for g in d["gates"])
+        (sh,) = eng.shadows.values()
+        assert "event calendar" in {SignalEngine.blocker_key(b) for b in sh["blocked_by"]}
+
+        eng_off = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)   # switch off: unaffected
+        out_off = eng_off.step(now_ms, {"NIFTY": T._ctx()}, T._tracker())
+        assert out_off["calls"]
+    finally:
+        T.NOW_MS = old
+
+
+def test_regime_gate_needs_several_confirmed_trend_bars_not_just_one():
+    eng = SignalEngine(EngineConfig(regime_gate=True), store_dir=None, log=lambda *a: None)
+    tr = T._tracker()
+    out = eng.step(T.NOW_MS, {"NIFTY": _trending_ctx()}, tr)
+    d = out["diagnostics"]["NIFTY"]
+    assert d["regime"]["label"] == "trend"          # regime_of() itself already says trend...
+    assert d["regime_streak"] == 1                  # ...but only 1 bar has confirmed it so far
+    assert d["regime_confirmed_trend"] is False
+    assert not out["calls"]
+    assert any("regime gate" in g for g in d["gates"])
+
+
+def test_regime_gate_opens_once_enough_consecutive_trend_bars_land():
+    eng = SignalEngine(EngineConfig(regime_gate=True, regime_confirm_bars=3), store_dir=None, log=lambda *a: None)
+    tr = T._tracker()
+    for i in range(3):
+        out = eng.step(T.NOW_MS + i * 60_000, {"NIFTY": _trending_ctx(extra_bars=i)}, tr)
+    d = out["diagnostics"]["NIFTY"]
+    assert d["regime_streak"] >= 3 and d["regime_confirmed_trend"] is True
+    assert not any("regime gate" in g for g in d["gates"])   # gate itself no longer blocks (unlike the 1-bar case)
 
 
 def test_regime_layer_shows_labelling_with_current_reading():

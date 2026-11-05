@@ -6,7 +6,7 @@ import pytest
 from tbrain.analytics import black76 as b
 from tbrain.analytics.chain import analyze
 from tbrain.brain.features import FeatureTracker
-from tbrain.signals.engine import EngineConfig, SignalEngine
+from tbrain.signals.engine import EngineConfig, SignalEngine, real_cost_per_lot
 from tbrain.timeutil import IST
 
 LOT, R = 65, 0.065
@@ -170,7 +170,7 @@ def test_v2_blocks_counter_trend_call():
     d = blk["diagnostics"]["NIFTY"]
     assert not blk["calls"] and d["blocked"] and "trend" in d["blocked"]
     assert d["sides"]["bullish"]["required_ok"] is False
-    off = SignalEngine(EngineConfig(trend_k=None), store_dir=None, log=lambda *a: None)  # switch off -> v1 behaviour
+    off = SignalEngine(EngineConfig(trend_k=None, cost_per_lot_inr=40.0), store_dir=None, log=lambda *a: None)  # v1 behaviour
     assert off.step(NOW_MS, {"NIFTY": _falling(_ctx())}, _tracker())["calls"]
 
 
@@ -223,7 +223,7 @@ def test_v21_defaults_from_backtest():
 
 
 def test_v2_correlated_call_is_flagged():
-    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    eng = SignalEngine(EngineConfig(cost_per_lot_inr=40.0), store_dir=None, log=lambda *a: None)
     tr = _tracker()
     for i in range(1201):
         tr.sample("SENSEX", NOW_MS / 1000 - 1200 + i, {"cvd": 100.0 * i, "fut": 82060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
@@ -235,7 +235,7 @@ def test_v2_correlated_call_is_flagged():
 
 def test_v2_correlation_block_switch():
     # off by default: both same-direction calls fire (just flagged, per the test above)
-    eng_off = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    eng_off = SignalEngine(EngineConfig(cost_per_lot_inr=40.0), store_dir=None, log=lambda *a: None)
     tr = _tracker()
     for i in range(1201):
         tr.sample("SENSEX", NOW_MS / 1000 - 1200 + i, {"cvd": 100.0 * i, "fut": 82060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
@@ -244,7 +244,7 @@ def test_v2_correlation_block_switch():
     assert len(blk_off["calls"]) == 2
 
     # on: the second same-direction call is blocked (shadowed) instead of firing live
-    eng_on = SignalEngine(EngineConfig(correlation_block=True), store_dir=None, log=lambda *a: None)
+    eng_on = SignalEngine(EngineConfig(correlation_block=True, cost_per_lot_inr=40.0), store_dir=None, log=lambda *a: None)
     tr2 = _tracker()
     for i in range(1201):
         tr2.sample("SENSEX", NOW_MS / 1000 - 1200 + i, {"cvd": 100.0 * i, "fut": 82060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
@@ -298,6 +298,20 @@ def test_shadow_tracks_blocked_candidate_to_outcome(tmp_path):
     assert (tmp_path / "shadow.jsonl").exists() and not (tmp_path / "calls.jsonl").exists()
     again = SignalEngine(EngineConfig(), store_dir=tmp_path, log=lambda *a: None)
     assert again.shadows[s["id"]]["outcome"] == "T2"  # survives restarts
+
+
+def test_real_cost_per_lot_reflects_stt_and_exceeds_old_flat_placeholder():
+    cost = real_cost_per_lot(entry_px=166.20, exit_px=166.20, lot=65)
+    assert cost > 40.0   # the old flat placeholder understated real STT/brokerage/exchange/GST costs
+    assert real_cost_per_lot(100.0, 200.0, 65) > real_cost_per_lot(100.0, 100.0, 65)  # STT scales with exit premium
+
+
+def test_default_cost_model_uses_real_cost_not_the_old_flat_placeholder():
+    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    assert eng.cfg.cost_per_lot_inr is None
+    blk = eng.step(NOW_MS, {"NIFTY": _ctx()}, _tracker())
+    (c,) = blk["calls"]
+    assert c["cost_est_per_lot"] > 40.0
 
 
 def test_regime_gate_switch():

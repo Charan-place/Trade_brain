@@ -213,6 +213,8 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     <button class="alertbtn" id="sw-dd" aria-pressed="true" data-key="dd_stop" title="Drawdown stop: once today's closed calls have been +2R or more and then give back 2R, no new calls for the rest of the day. Blocked calls are still tracked as shadows.">🛑 Drawdown stop: on</button>
     <button class="alertbtn" id="sw-t1check" aria-pressed="false" data-key="t1_direction_check" title="At T1: re-check trend/VWAP and the last 2 candles. If the move is turning against the trade, exit now and lock the T1-level profit instead of riding to breakeven/T2. Off by default while we collect evidence.">🎯 T1 direction check: off</button>
     <button class="alertbtn" id="sw-volregime" aria-pressed="false" data-key="vol_regime_filter" title="When local ATR spikes >=1.3x the day's trailing median ATR, tighten the SL floor and require one extra clue before entering (10:xx vs 11:xx, 19 Oct-4 Nov: payoff ratio 1.13 vs 1.86, driven by a wider avg SL across those days). Off by default while we collect evidence.">📉 Vol regime filter: off</button>
+    <button class="alertbtn" id="sw-regimegate" aria-pressed="false" data-key="regime_gate" title="Breakout calls only once the market has read 'trend' for 3 consecutive 1-min bars (not a single noisy reading). 12 live days, 155 calls: 'range' regime averaged -29.4 pnl/call (43.8% win) vs 'trend' +646.9 pnl/call (50% win, 22x better). Backtest on 2 real days: cuts call volume ~75% but every surviving call won. Off by default while we collect more evidence.">📐 Regime gate: off</button>
+    <button class="alertbtn" id="sw-eventcal" aria-pressed="false" data-key="event_calendar_gate" title="Block new calls around known scheduled events (RBI MPC, Union Budget, FOMC reaction mornings) - this engine only buys premium, so IV crush after a scheduled announcement can lose money even when direction is right. Dates are hardcoded from each body's own official calendar and need an annual refresh. Off by default.">📅 Event calendar: off</button>
     <button class="alertbtn" id="alerts" aria-pressed="false" title="Sound + desktop notification on new calls, T1, SL">🔕 Alerts off</button>
     </div>
     <button class="themebtn" id="theme" title="Toggle theme">◐ theme</button>
@@ -964,7 +966,9 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
   let ruleSettings = {}, ruleCanEdit = false;
   const SW = {allow_afternoon: ["sw-afternoon", "🌇 Afternoon calls", false], dd_stop: ["sw-dd", "🛑 Drawdown stop", true],
               t1_direction_check: ["sw-t1check", "🎯 T1 direction check", false],
-              vol_regime_filter: ["sw-volregime", "📉 Vol regime filter", false]};
+              vol_regime_filter: ["sw-volregime", "📉 Vol regime filter", false],
+              regime_gate: ["sw-regimegate", "📐 Regime gate", false],
+              event_calendar_gate: ["sw-eventcal", "📅 Event calendar", false]};
   function paintSwitches(live) {
     for (const [key, [id, label, dflt]] of Object.entries(SW)) {
       const b = $(id); if (!b) continue;

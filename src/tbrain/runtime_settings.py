@@ -5,6 +5,8 @@ Only whitelisted booleans are stored (see SignalEngine.RUNTIME_KEYS):
   dd_stop             - drawdown stop on today's closed calls (default on)
   t1_direction_check  - at T1, exit now instead of riding if trend/VWAP or last 2 candles flip (default off)
   vol_regime_filter   - tighten SL + raise the score bar when local ATR is spiking vs the day's trailing median ATR (default off)
+  regime_gate         - breakout calls only once 'trend' regime is confirmed for regime_confirm_bars bars (default off)
+  event_calendar_gate - block new calls around known scheduled events (RBI MPC/Budget/FOMC reaction) (default off)
 Local:  data/live/settings.json.   Modal: the shared modal.Dict (key "settings").
 """
 from __future__ import annotations
@@ -15,7 +17,8 @@ import time
 import uuid
 from pathlib import Path
 
-ALLOWED = ("allow_afternoon", "dd_stop", "t1_direction_check", "vol_regime_filter")
+ALLOWED = ("allow_afternoon", "dd_stop", "t1_direction_check", "vol_regime_filter", "regime_gate",
+           "event_calendar_gate")
 
 
 def clean(d: dict | None) -> dict:

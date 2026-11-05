@@ -21,6 +21,7 @@ from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 
 from tbrain.analytics.black76 import price as b76
+from tbrain.signals.event_calendar import is_event_blackout
 from tbrain.timeutil import IST
 
 LABEL = "EXPERIMENTAL · rule-based, not yet validated"
@@ -36,7 +37,7 @@ class EngineConfig:
     min_rr_net: float = 1.5
     max_spread_pct: float = 2.0
     min_depth_lots: int = 2
-    cost_per_lot_inr: float = 40.0  # PLACEHOLDER: ~2 x Rs20 brokerage; statutory charges (STT etc.) NOT included
+    cost_per_lot_inr: float | None = None  # None = use real_cost_per_lot() below; set a number to override/test
     risk_per_trade_inr: float = 0.0
     time_stop_min: int = 30
     cooldown_min: int = 10
@@ -61,6 +62,11 @@ class EngineConfig:
     trend_er: float = 0.25            # efficiency ratio over 60 min at/above which the market is trending
     range_er: float = 0.15            # ... below which it is ranging
     range_crosses: int = 4            # VWAP crossings in 60 min that also mark a range
+    regime_confirm_bars: int = 3      # regime_gate needs this many CONSECUTIVE 1-min bars reading 'trend',
+                                       # not just the current one (ADX/ER-style regime labels lag and flicker
+                                       # right at the trend/range boundary; a single noisy reading shouldn't open
+                                       # or close the gate)
+    event_calendar_gate: bool = False  # block NEW calls around known scheduled events (RBI MPC/Budget/FOMC reaction)
     # ---- v2.2 session rules (9 live days 19 Oct-30 Oct: 12:00-13:59 = -9,316, 14:00+ = -7,924 pnl/lot) ----
     afternoon_cutoff: dtime | None = dtime(12, 0)   # no NEW calls after this unless allow_afternoon (UI switch)
     allow_afternoon: bool = False
@@ -90,6 +96,31 @@ class EngineConfig:
 
 def _fmt(x: float | None, d: int = 2) -> str:
     return "—" if x is None else f"{x:,.{d}f}"
+
+
+# 2026 NSE/BSE index-options round-trip charges (buy to open, sell to close), per lot. All ad-valorem rates are
+# on PREMIUM turnover (entry_px + exit_px) x lot, not notional - these are the actual numbers the earlier flat
+# cost_per_lot_inr=40 placeholder didn't include (its own comment admitted as much).
+BROKERAGE_PER_ORDER_INR = 20.0       # flat, most discount brokers; 2 orders (buy + sell) per round trip
+STT_SELL_PREMIUM_RATE = 0.00125      # STT on options premium, charged on the SELL leg only (2026 rate: 0.125%)
+EXCH_TXN_RATE = 0.0003503            # NSE/BSE transaction charges, both legs, on premium turnover
+SEBI_FEE_RATE = 0.0000010            # negligible but real
+STAMP_DUTY_BUY_RATE = 0.00003        # stamp duty, BUY leg only, on premium turnover
+GST_RATE = 0.18                      # on (brokerage + exchange txn charges), not on STT/stamp duty
+
+
+def real_cost_per_lot(entry_px: float, exit_px: float, lot: int) -> float:
+    """Real round-trip cost per lot for one NSE/BSE index option trade, given an (unknown at entry time)
+    estimated exit price. Used instead of a flat placeholder so min_rr_net reflects actual, not guessed, cost."""
+    buy_turnover = entry_px * lot
+    sell_turnover = exit_px * lot
+    brokerage = 2 * BROKERAGE_PER_ORDER_INR
+    stt = sell_turnover * STT_SELL_PREMIUM_RATE
+    exch = (buy_turnover + sell_turnover) * EXCH_TXN_RATE
+    sebi = (buy_turnover + sell_turnover) * SEBI_FEE_RATE
+    stamp = buy_turnover * STAMP_DUTY_BUY_RATE
+    gst = (brokerage + exch) * GST_RATE
+    return brokerage + stt + exch + sebi + stamp + gst
 
 
 def _baseline_atr(all_bars: list, exclude_last: int = 5) -> float | None:
@@ -148,6 +179,8 @@ class SignalEngine:
         self._last_issue_ms: dict[str, float] = {}
         self._issued_bar: dict[str, int] = {}
         self._shadow_bar: dict[tuple, int] = {}
+        self._regime_streak: dict[str, int] = {}   # consecutive bars reading 'trend', per underlying
+        self._regime_bar: dict[str, int] = {}      # last bar_id the streak was advanced on, per underlying (dedup)
         self.on_event = None  # optional hook (event, call) -> None, e.g. MongoSink.on_call_event; must not raise
         self.on_step = None   # optional hook (now_ms, ctxs) -> None, e.g. ExecutionHub.on_step
         self._load()
@@ -232,6 +265,10 @@ class SignalEngine:
                 gates.append(f"paused {cfg.loss_pause_min} min after {cfg.loss_pause_n} stop-losses in a row")
         if cfg.afternoon_cutoff is not None and not cfg.allow_afternoon and now.time() >= cfg.afternoon_cutoff:
             gates.append(f"afternoon calls are off after {cfg.afternoon_cutoff:%H:%M} (switch on the dashboard)")
+        if cfg.event_calendar_gate:
+            blackout = is_event_blackout(now.date(), now.time())
+            if blackout:
+                gates.append(f"event calendar: {blackout}")
         if cfg.dd_stop:
             peak, cum = self.realized_path(now_ms)
             if peak >= cfg.dd_peak_r and peak - cum >= cfg.dd_giveback_r:
@@ -257,8 +294,15 @@ class SignalEngine:
         last_close = bars[-1][4] if bars else None
         crosses = tr.crossings(und, "vwap_dev", 3600, eps=0.1 * atr if atr else 0.0) if hasattr(tr, "crossings") else None
         regime = regime_of(all_bars, atr, crosses, cfg)
-        if cfg.regime_gate and regime["label"] != "trend":
-            gates.append(f"regime gate: market is '{regime['label']}' (breakouts only in trend)")
+        cur_bar_id = int(bars[-1][0]) if bars else None
+        if cur_bar_id is not None and self._regime_bar.get(und) != cur_bar_id:
+            self._regime_bar[und] = cur_bar_id
+            self._regime_streak[und] = self._regime_streak.get(und, 0) + 1 if regime["label"] == "trend" else 0
+        regime_streak = self._regime_streak.get(und, 0)
+        regime_confirmed_trend = regime_streak >= cfg.regime_confirm_bars
+        if cfg.regime_gate and not regime_confirmed_trend:
+            gates.append(f"regime gate: market is '{regime['label']}' ({regime_streak}/{cfg.regime_confirm_bars} "
+                         f"trend bars confirmed; breakouts only once trend is confirmed)")
 
         baseline_atr = _baseline_atr(all_bars)
         vol_ratio = atr / baseline_atr if (atr and baseline_atr) else None
@@ -312,11 +356,12 @@ class SignalEngine:
 
         out = {"evaluated_at": now.isoformat(), "gates": gates, "sides": sides, "min_score": cfg.min_score,
                "atr_1m": atr, "hh10": hh, "ll10": ll, "blocked": None, "regime": regime,
+               "regime_streak": regime_streak, "regime_confirmed_trend": regime_confirmed_trend,
                "vol_ratio": vol_ratio, "vol_spiking": vol_spiking, "min_score_needed": min_score_needed}
         data_blocked = any(g.startswith(DATA_GATES) for g in gates)
         if not bars or data_blocked:
             return out
-        bar_id = int(bars[-1][0])
+        bar_id = cur_bar_id
         sl_mult = cfg.vol_spike_sl_floor_mult if vol_spiking else 0.8
 
         # ---------------- breakout playbook ----------------
@@ -452,8 +497,10 @@ class SignalEngine:
         entry = ask
         if not (p_sl < entry < p_t1 < p_t2):
             return None, "premium levels not ordered after time decay (move too small for this option)"
-        risk_lot = (entry - p_sl) * lot + cfg.cost_per_lot_inr
-        reward_lot = (p_t1 - entry) * lot - cfg.cost_per_lot_inr
+        cost_sl = cfg.cost_per_lot_inr if cfg.cost_per_lot_inr is not None else real_cost_per_lot(entry, p_sl, lot)
+        cost_t1 = cfg.cost_per_lot_inr if cfg.cost_per_lot_inr is not None else real_cost_per_lot(entry, p_t1, lot)
+        risk_lot = (entry - p_sl) * lot + cost_sl
+        reward_lot = (p_t1 - entry) * lot - cost_t1
         rr = reward_lot / risk_lot if risk_lot > 0 else 0
         if enforce and rr < cfg.min_rr_net:
             return None, f"net R:R {rr:.2f} < {cfg.min_rr_net} after est. costs"
@@ -484,9 +531,14 @@ class SignalEngine:
             "u_entry": spot, "u_sl": sl_u, "u_sl_active": sl_u, "u_t1": t1_u, "u_t2": t2_u, "p_sl_active": p_sl,
             "entry": entry, "entry_zone": [round(mid, 2), round(ask * 1.005, 2)], "p_sl": p_sl, "p_t1": p_t1, "p_t2": p_t2,
             "iv_at_entry": iv, "spread_pct": spr, "risk_per_lot": risk_lot, "reward_t1_per_lot": reward_lot, "rr_net": rr,
-            "cost_est_per_lot": cfg.cost_per_lot_inr, "size_hint_lots": lots, "time_stop_ms": stop_at.timestamp() * 1000,
+            "cost_override": cfg.cost_per_lot_inr, "size_hint_lots": lots, "time_stop_ms": stop_at.timestamp() * 1000,
             "status": "open", "t1_hit": False, "outcome": None, "exit": None, "exit_ms": None,
-            "last_bid": bid, "pnl_per_lot": -cfg.cost_per_lot_inr, "r_now": 0.0, "mfe": 0.0, "mae": 0.0,
+            "last_bid": bid,
+            "cost_est_per_lot": (cfg.cost_per_lot_inr if cfg.cost_per_lot_inr is not None
+                                  else real_cost_per_lot(entry, entry, lot)),
+            "pnl_per_lot": -(cfg.cost_per_lot_inr if cfg.cost_per_lot_inr is not None
+                             else real_cost_per_lot(entry, entry, lot)),
+            "r_now": 0.0, "mfe": 0.0, "mae": 0.0,
         }, None
 
     # ------------------------------------------------------------ direction re-check (while in profit)
@@ -547,7 +599,9 @@ class SignalEngine:
         bid = q.get("bp1") or q.get("ltp")
         if bid:
             c["last_bid"] = bid
-            pnl = (bid - c["entry"]) * c["lot"] - c["cost_est_per_lot"]
+            cost = c["cost_override"] if c.get("cost_override") is not None else real_cost_per_lot(c["entry"], bid, c["lot"])
+            c["cost_est_per_lot"] = cost
+            pnl = (bid - c["entry"]) * c["lot"] - cost
             c["pnl_per_lot"] = pnl
             c["r_now"] = pnl / c["risk_per_lot"] if c["risk_per_lot"] else 0.0
             c["mfe"] = max(c["mfe"], pnl)
@@ -618,7 +672,8 @@ class SignalEngine:
             peak = max(peak, cum)
         return peak, cum
 
-    RUNTIME_KEYS = ("allow_afternoon", "dd_stop", "t1_direction_check", "vol_regime_filter")
+    RUNTIME_KEYS = ("allow_afternoon", "dd_stop", "t1_direction_check", "vol_regime_filter", "regime_gate",
+                    "event_calendar_gate")
 
     def apply_settings(self, settings: dict | None) -> dict:
         """Runtime switches from the dashboard (only whitelisted booleans). Returns what changed."""
@@ -660,7 +715,8 @@ class SignalEngine:
                          ("already open", "one open per index"), ("wall", "OI wall"), ("r:r", "R:R"), ("spread", "spread"),
                          ("thin offer", "depth"), ("regime", "regime gate"), ("paused", "loss pause"),
                          ("shadow-only", "range-fade (shadow)"), ("levels", "levels"), ("stop too wide", "stop too wide"),
-                         ("afternoon", "afternoon cutoff"), ("drawdown stop", "drawdown stop")):
+                         ("afternoon", "afternoon cutoff"), ("drawdown stop", "drawdown stop"),
+                         ("event calendar", "event calendar")):
             if k in t:
                 return label
         return "other"
@@ -690,11 +746,13 @@ class SignalEngine:
                 "diagnostics": self.diag, "scoreboard": self.scoreboard(),
                 "rules": {"min_score": self.cfg.min_score, "t1_r": self.cfg.t1_r, "t2_r": self.cfg.t2_r,
                           "require_vwap": self.cfg.require_vwap, "trend_k": self.cfg.trend_k,
-                          "regime_gate": self.cfg.regime_gate, "loss_pause_n": self.cfg.loss_pause_n,
+                          "loss_pause_n": self.cfg.loss_pause_n,
                           "premium_stop": self.cfg.premium_stop, "min_rr_net": self.cfg.min_rr_net,
                           "time_stop_min": self.cfg.time_stop_min, "cost_per_lot_inr": self.cfg.cost_per_lot_inr,
                           "afternoon_cutoff": self.cfg.afternoon_cutoff.strftime("%H:%M") if self.cfg.afternoon_cutoff else None,
                           "allow_afternoon": self.cfg.allow_afternoon, "dd_stop": self.cfg.dd_stop,
                           "dd_peak_r": self.cfg.dd_peak_r, "dd_giveback_r": self.cfg.dd_giveback_r,
                           "t1_direction_check": self.cfg.t1_direction_check,
-                          "vol_regime_filter": self.cfg.vol_regime_filter, "vol_spike_k": self.cfg.vol_spike_k}}
+                          "vol_regime_filter": self.cfg.vol_regime_filter, "vol_spike_k": self.cfg.vol_spike_k,
+                          "regime_gate": self.cfg.regime_gate, "regime_confirm_bars": self.cfg.regime_confirm_bars,
+                          "event_calendar_gate": self.cfg.event_calendar_gate}}
