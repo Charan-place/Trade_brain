@@ -209,6 +209,12 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     <div class="tabs" role="tablist" id="tabs"></div>
     <select id="expiry" aria-label="Expiry"></select>
     <div class="ctrls" role="group" aria-label="Brain switches">
+    <select id="mode-picker" title="Sets every switch below at once. These are TRADE-OFFS, not a guarantee of more profit: Conservative trades less often but only in clearer conditions; Aggressive trades more often, including conditions the data shows are historically weaker.">
+      <option value="">— choose a mode —</option>
+      <option value="conservative">🐢 Conservative: fewest, highest-confidence trades</option>
+      <option value="balanced">⚖️ Balanced: today's proven default (most track record)</option>
+      <option value="aggressive">🐇 Aggressive: more trade volume, more risk (not more win%)</option>
+    </select>
     <button class="alertbtn" id="sw-afternoon" aria-pressed="false" data-key="allow_afternoon" title="After 12:00 the brain stops issuing NEW calls (9 live days 19-30 Oct: 12:00-13:59 pnl -9,316, 14:00+ pnl -7,924). Turn on to keep getting calls until 14:45. Blocked calls are still tracked as shadows.">🌇 Afternoon calls: off</button>
     <button class="alertbtn" id="sw-dd" aria-pressed="true" data-key="dd_stop" title="Drawdown stop: once today's closed calls have been +2R or more and then give back 2R, no new calls for the rest of the day. Blocked calls are still tracked as shadows.">🛑 Drawdown stop: on</button>
     <button class="alertbtn" id="sw-t1check" aria-pressed="false" data-key="t1_direction_check" title="At T1: re-check trend/VWAP and the last 2 candles. If the move is turning against the trade, exit now and lock the T1-level profit instead of riding to breakeven/T2. Off by default while we collect evidence.">🎯 T1 direction check: off</button>
@@ -969,6 +975,20 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
               vol_regime_filter: ["sw-volregime", "📉 Vol regime filter", false],
               regime_gate: ["sw-regimegate", "📐 Regime gate", false],
               event_calendar_gate: ["sw-eventcal", "📅 Event calendar", false]};
+  const MODES = {
+    conservative: {allow_afternoon: false, dd_stop: true, t1_direction_check: false,
+                   vol_regime_filter: true, regime_gate: true, event_calendar_gate: true},
+    balanced:     {allow_afternoon: false, dd_stop: true, t1_direction_check: false,
+                   vol_regime_filter: false, regime_gate: false, event_calendar_gate: false},
+    aggressive:   {allow_afternoon: true, dd_stop: true, t1_direction_check: true,
+                   vol_regime_filter: false, regime_gate: false, event_calendar_gate: false},
+  };
+  function detectMode() {
+    for (const [name, cfg] of Object.entries(MODES)) {
+      if (Object.entries(cfg).every(([k, v]) => (k in ruleSettings ? ruleSettings[k] : SW[k][2]) === v)) return name;
+    }
+    return "";
+  }
   function paintSwitches(live) {
     for (const [key, [id, label, dflt]] of Object.entries(SW)) {
       const b = $(id); if (!b) continue;
@@ -979,6 +999,8 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
       b.disabled = !ruleCanEdit;
       if (!ruleCanEdit && b.dataset.info && !b.dataset.info.endsWith("(view only)")) b.dataset.info += " (view only)";
     }
+    const mp = $("mode-picker");
+    if (mp && document.activeElement !== mp) mp.value = detectMode();
   }
   async function loadSwitches() {
     try { const r = await fetch("/api/settings", {cache: "no-store"}); if (!r.ok) return;
@@ -1002,6 +1024,20 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
   }
   loadSwitches();
 
+  // ---------- mode picker: sets every switch at once (trade-offs, not a profit guarantee) ----------
+  $("mode-picker").onchange = async (e) => {
+    const name = e.target.value;
+    if (!name) return;
+    if (!ruleCanEdit) { e.target.value = detectMode(); return; }
+    const msgs = {aggressive: "Aggressive trades MORE often, including the historically weaker afternoon window. This is not a path to higher win rate — it's more exposure. Switch?",
+                  conservative: "Conservative trades LESS often, only in stricter conditions. Some days this may produce zero calls. Switch?"};
+    if (msgs[name] && !window.confirm(msgs[name])) { e.target.value = detectMode(); return; }
+    try {
+      const r = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
+                                              body: JSON.stringify(MODES[name])});
+      if (r.ok) { const j = await r.json(); ruleSettings = j.settings || ruleSettings; paintSwitches(); }
+    } catch {}
+  };
   // ---------- alerts: Web Audio chime + desktop notification ----------
   let audio = null, alertsOn = store.get("tb.alerts") === "1";
   const seen = new Map();  // call id -> last status seen
