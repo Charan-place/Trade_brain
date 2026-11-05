@@ -27,6 +27,7 @@ BIG_KEEP_S = 900
 _DEPTH_KEYS = [f"{s}{n}" for n in range(1, DEPTH + 1) for s in ("bp", "bq", "ap", "aq")]
 MIN_SESSIONS_FOR_TRAINING = 20
 CHART_BARS = 400  # a full NSE/BSE session is 375 one-minute bars
+CHAIN_MAX_AGE_S = 30.0
 
 
 def _t_years(expiry, val: datetime) -> float:
@@ -278,16 +279,22 @@ class BrainState:
                 "oi_base": prev_oi[k] if use_prev else first.get(k, {}).get("oi"),
                 "ltp_base": row.get("cp") if use_prev else first.get(k, {}).get("ltp"),
                 "ltt_ms": row.get("ltt_ms"),
+                "recv_ns": row.get("recv_ns"),
             })
         chains = {}
         for exp in sorted(legs_by_exp)[:3]:
-            legs = legs_by_exp[exp]
+            observed = [l["recv_ns"] for l in legs_by_exp[exp] if l.get("recv_ns") is not None]
+            asof_ns = (int(now_dt.timestamp() * 1e9) if mode == "live" and in_market_hours(now_dt)
+                       else max(observed, default=int(now_dt.timestamp() * 1e9)))
+            legs = [l for l in legs_by_exp[exp] if l.get("recv_ns") is None or
+                    0 <= (asof_ns - l["recv_ns"]) / 1e9 <= CHAIN_MAX_AGE_S]
             if mode == "live" and in_market_hours(now_dt):
                 val = now_dt
             else:  # after hours / demo: value at the time the prices were made, not "now"
                 ltts = [l["ltt_ms"] for l in legs if l.get("ltt_ms")]
                 val = datetime.fromtimestamp(max(ltts) / 1000, IST) if ltts else now_ist()
             a = analyze(legs, _t_years(exp, val), self.r, spot)
+            a["stale_legs_excluded"] = len(legs_by_exp[exp]) - len(legs)
             a["expiry"] = exp.isoformat()
             a["valued_at"] = val.isoformat()
             a["baseline"] = "prev close (REST prev_oi)" if any(l["key"] in prev_oi for l in legs) else "session start"

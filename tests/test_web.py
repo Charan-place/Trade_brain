@@ -283,7 +283,7 @@ def test_rule_switches_owner_only_json_only():
     assert c.post("/api/settings", data="allow_afternoon=true",
                   headers={"Content-Type": "application/x-www-form-urlencoded"}).status_code == 415
     r = c.post("/api/settings", json={"allow_afternoon": True, "min_score": 1})
-    assert r.status_code == 200 and r.json()["settings"] == {"allow_afternoon": True}
+    assert r.status_code == 200 and r.json()["settings"] == {"allow_afternoon": True, "mode": "custom"}
     v, *_ = _client(allowed=("*",), userinfo={"email": "viewer@gmail.com", "email_verified": True})
     v.get("/login")
     assert v.get("/api/settings").json()["can_edit"] is False

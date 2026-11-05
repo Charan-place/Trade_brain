@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Trade Brain</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%236d5ce8' fill-opacity='.18' stroke='%236d5ce8' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%236d5ce8'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%237ddec9' fill-opacity='.18' stroke='%237ddec9' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%237ddec9'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
   color-scheme: light;
   --page:#eef1f6; --surface:#ffffff; --surface-2:#f3f5f9; --ink:#142033; --ink-2:#465266; --muted:#7a8597;
-  --grid:#e1e6ee; --axis:#c5ccd8; --ring:rgba(20,32,51,.10); --brain:#6d5ce8; --brain-wash:rgba(109,92,232,.10);
+  --grid:#e1e6ee; --axis:#c5ccd8; --ring:rgba(20,32,51,.10); --brain:#087d70; --brain-wash:rgba(8,125,112,.10);
   --call:#2a78d6; --put:#eb6834; --call-wash:rgba(42,120,214,.10); --put-wash:rgba(235,104,52,.10);
   --buy:#2a78d6; --sell:#e34948; --mid:#f0efec;
   --good:#0ca30c; --warn:#fab219; --crit:#d03b3b; --good-ink:#006300;
@@ -21,17 +21,17 @@
   :root:where(:not([data-theme="light"])){
     color-scheme: dark;
     --page:#0e1520; --surface:#151f2e; --surface-2:#1b2738; --ink:#e7ecf3; --ink-2:#aab5c4; --muted:#7d899b;
-    --grid:#233144; --axis:#34455c; --ring:rgba(170,190,220,.13); --brain:#9b8cff; --brain-wash:rgba(155,140,255,.14);
+    --grid:#203442; --axis:#385262; --ring:rgba(102,190,189,.18); --brain:#7ddec9; --brain-wash:rgba(91,214,186,.12);
     --call:#3987e5; --put:#d95926; --call-wash:rgba(57,135,229,.12); --put-wash:rgba(217,89,38,.12);
-    --buy:#3987e5; --sell:#e66767; --mid:#383835; --good-ink:#0ca30c; --glow:rgba(57,135,229,.45);
+    --buy:#49d6a1; --sell:#ff727b; --mid:#233342; --good-ink:#58dda8; --glow:rgba(71,199,214,.24);
   }
 }
 :root[data-theme="dark"]{
   color-scheme: dark;
   --page:#0e1520; --surface:#151f2e; --surface-2:#1b2738; --ink:#e7ecf3; --ink-2:#aab5c4; --muted:#7d899b;
-  --grid:#233144; --axis:#34455c; --ring:rgba(170,190,220,.13); --brain:#9b8cff; --brain-wash:rgba(155,140,255,.14);
-  --call:#3987e5; --put:#d95926; --call-wash:rgba(57,135,229,.12); --put-wash:rgba(217,89,38,.12);
-  --buy:#3987e5; --sell:#e66767; --mid:#383835; --good-ink:#0ca30c; --glow:rgba(57,135,229,.45);
+  --grid:#203442; --axis:#385262; --ring:rgba(102,190,189,.18); --brain:#7ddec9; --brain-wash:rgba(91,214,186,.12);
+  --call:#47c7d6; --put:#ff9a69; --call-wash:rgba(71,199,214,.13); --put-wash:rgba(255,154,105,.13);
+  --buy:#49d6a1; --sell:#ff727b; --mid:#233342; --good-ink:#58dda8; --glow:rgba(71,199,214,.24);
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--ink);font:14px/1.5 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -128,17 +128,17 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
 .tf{border:0;background:var(--surface-2);color:var(--ink-2);padding:4px 10px;border-radius:6px;cursor:pointer;font:inherit;font-size:12px}
 .tf[aria-pressed="true"]{background:var(--call);color:#fff}
 .ovl{font-size:12px;color:var(--ink-2);display:inline-flex;gap:4px;align-items:center;margin-left:8px;cursor:pointer}
-:root{--ema9:#1baf7a;--ema21:#6250d6}
-@media (prefers-color-scheme: dark){:root:where(:not([data-theme="light"])){--ema9:#199e70;--ema21:#9085e9}}
-:root[data-theme="dark"]{--ema9:#199e70;--ema21:#9085e9}
+:root{--ema9:#1baf7a;--ema21:#b77913}
+@media (prefers-color-scheme: dark){:root:where(:not([data-theme="light"])){--ema9:#49d6a1;--ema21:#ffc66d}}
+:root[data-theme="dark"]{--ema9:#49d6a1;--ema21:#ffc66d}
 .row-chart{grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);margin-bottom:14px}
 @media (max-width:980px){.tfbar{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:0 0 8px}
 .tf{border:0;background:var(--surface-2);color:var(--ink-2);padding:4px 10px;border-radius:6px;cursor:pointer;font:inherit;font-size:12px}
 .tf[aria-pressed="true"]{background:var(--call);color:#fff}
 .ovl{font-size:12px;color:var(--ink-2);display:inline-flex;gap:4px;align-items:center;margin-left:8px;cursor:pointer}
-:root{--ema9:#1baf7a;--ema21:#6250d6}
-@media (prefers-color-scheme: dark){:root:where(:not([data-theme="light"])){--ema9:#199e70;--ema21:#9085e9}}
-:root[data-theme="dark"]{--ema9:#199e70;--ema21:#9085e9}
+:root{--ema9:#1baf7a;--ema21:#b77913}
+@media (prefers-color-scheme: dark){:root:where(:not([data-theme="light"])){--ema9:#49d6a1;--ema21:#ffc66d}}
+:root[data-theme="dark"]{--ema9:#49d6a1;--ema21:#ffc66d}
 .row-chart{grid-template-columns:minmax(0,1fr)}}
 #candles,#optChart{width:100%;height:auto;display:block}
 .alertbtn{border:0;background:var(--surface);color:var(--ink);padding:6px 12px;border-radius:8px;cursor:pointer;box-shadow:0 0 0 1px var(--ring);font:inherit}
@@ -194,27 +194,185 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
 #toast{position:fixed;left:50%;top:14px;transform:translateX(-50%);background:var(--surface);box-shadow:0 0 0 2px var(--warn),0 10px 30px rgba(0,0,0,.35);border-radius:12px;padding:12px 16px;z-index:20;display:none;max-width:min(560px,92vw);font-size:14px}
 #toast b{font-size:15px}
 .empty{color:var(--muted);padding:24px;text-align:center}
+/* Market-terminal visual system */
+:root{
+  color-scheme:dark;
+  --page:#070d16;--surface:#101a27;--surface-2:#162434;--ink:#e8f1f5;--ink-2:#a9bbc5;--muted:#718994;
+  --grid:#203442;--axis:#385262;--ring:rgba(102,190,189,.18);--brain:#7ddec9;--brain-wash:rgba(91,214,186,.12);
+  --call:#47c7d6;--put:#ff9a69;--call-wash:rgba(71,199,214,.13);--put-wash:rgba(255,154,105,.13);
+  --buy:#49d6a1;--sell:#ff727b;--mid:#233342;--good:#45d6a0;--warn:#ffc66d;--crit:#ff727b;--good-ink:#58dda8;--glow:rgba(71,199,214,.24);--ema9:#49d6a1;--ema21:#ffc66d;
+  background:var(--page);
+}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --page:#eef4f3;--surface:#fbfefd;--surface-2:#eaf2f1;--ink:#10242a;--ink-2:#435d63;--muted:#71868a;
+  --grid:#d8e5e3;--axis:#b3c8c5;--ring:rgba(16,69,67,.13);--brain:#087d70;--brain-wash:rgba(8,125,112,.10);
+  --call:#087d9b;--put:#d85d37;--call-wash:rgba(8,125,155,.10);--put-wash:rgba(216,93,55,.10);
+  --buy:#07835f;--sell:#c8444c;--mid:#dfe9e7;--good:#07835f;--warn:#b77913;--crit:#c8444c;--good-ink:#087451;--glow:rgba(8,125,155,.2);--ema9:#07835f;--ema21:#b77913;
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --page:#070d16;--surface:#101a27;--surface-2:#162434;--ink:#e8f1f5;--ink-2:#a9bbc5;--muted:#718994;
+  --grid:#203442;--axis:#385262;--ring:rgba(102,190,189,.18);--brain:#7ddec9;--brain-wash:rgba(91,214,186,.12);
+  --call:#47c7d6;--put:#ff9a69;--call-wash:rgba(71,199,214,.13);--put-wash:rgba(255,154,105,.13);
+  --buy:#49d6a1;--sell:#ff727b;--mid:#233342;--good:#45d6a0;--warn:#ffc66d;--crit:#ff727b;--good-ink:#58dda8;--glow:rgba(71,199,214,.24);--ema9:#49d6a1;--ema21:#ffc66d;
+}
+html{scroll-behavior:smooth;scroll-padding-top:88px}
+body{
+  background:radial-gradient(ellipse at 9% -12%,rgba(36,143,145,.16),transparent 34rem),
+             radial-gradient(ellipse at 100% 2%,rgba(89,92,189,.13),transparent 32rem),var(--page);
+}
+.wrap{max-width:1560px;padding-right:22px;padding-left:22px}
+header{margin-right:-22px;margin-left:-22px;padding:12px 22px;background:color-mix(in srgb,var(--page) 82%,transparent);border-color:var(--grid)}
+.section-nav{display:flex;gap:6px;overflow-x:auto;margin:0 0 18px;padding:2px 1px 7px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.section-nav::-webkit-scrollbar{display:none}
+.section-nav a{flex:none;padding:6px 11px;border-radius:999px;color:var(--ink-2);text-decoration:none;font-size:11.5px;background:color-mix(in srgb,var(--surface) 78%,transparent);box-shadow:inset 0 0 0 1px var(--ring);transition:color .16s ease,background .16s ease,transform .16s ease}
+.section-nav a:hover,.section-nav a:focus-visible{color:var(--brain);background:var(--brain-wash);transform:translateY(-1px)}
+.brand .mark{background:rgba(77,225,187,.15);box-shadow:inset 0 0 0 1.5px #58dabb,0 0 24px rgba(77,225,187,.25)}
+.brand .mark::after{background:#58dabb;box-shadow:0 0 12px rgba(77,225,187,.65)}
+h1{font-size:20px;letter-spacing:.035em}
+.brand .tag{letter-spacing:.02em}
+.pill{background:color-mix(in srgb,var(--surface) 86%,transparent);box-shadow:inset 0 0 0 1px var(--ring);padding:5px 11px}
+.tab,.alertbtn,select,.rbtn,.themebtn{transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}
+.tab:hover,.alertbtn:hover,.rbtn:not(:disabled):hover{transform:translateY(-1px);box-shadow:0 0 0 1px var(--brain),0 5px 18px var(--glow)}
+select{padding:7px 10px}
+.card{border-radius:16px;background:linear-gradient(145deg,color-mix(in srgb,var(--surface) 97%,white 3%),var(--surface));box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 0 0 1px var(--ring),0 12px 32px rgba(0,0,0,.12);padding:18px}
+h2{font-size:16px;letter-spacing:.035em}
+.tile{position:relative;overflow:hidden;min-height:108px;background:linear-gradient(145deg,var(--surface),color-mix(in srgb,var(--surface) 75%,var(--brain) 25%));}
+.tile::after{content:"";position:absolute;width:105px;height:105px;right:-38px;top:-44px;border:1px solid color-mix(in srgb,var(--brain) 24%,transparent);border-radius:50%;box-shadow:0 0 0 12px color-mix(in srgb,var(--brain) 5%,transparent),0 0 0 26px color-mix(in srgb,var(--brain) 3%,transparent);pointer-events:none}
+.tile .lbl{text-transform:uppercase;font-size:10.5px;font-weight:600;letter-spacing:.105em;color:var(--muted)}
+.tile .val{font:600 27px/1.15 "IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;letter-spacing:.005em}
+.tile .sub{font-size:11.5px}
+.hero{font-family:"IBM Plex Sans Condensed",sans-serif}
+.row-chart,.row2,.row3{gap:16px}
+.row-chart{margin-bottom:16px}
+.row2,.row3{margin-bottom:16px;align-items:start}
+.section-heading{display:flex;align-items:center;gap:12px;margin:24px 0 11px;scroll-margin-top:90px}
+.section-heading .section-index{display:grid;place-items:center;width:29px;height:29px;flex:none;border-radius:9px;color:var(--brain);background:var(--brain-wash);font:600 12px/1 "IBM Plex Sans Condensed",sans-serif;box-shadow:inset 0 0 0 1px var(--ring)}
+.section-heading h2{margin:0;font-size:16px;letter-spacing:.025em}
+.section-heading p{margin:2px 0 0;font-size:11.5px;color:var(--muted)}
+.section-rule{height:1px;flex:1;margin-left:4px;background:linear-gradient(90deg,var(--grid),transparent)}
+.sig-state{padding:10px 12px;border-radius:10px;background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--ring)}
+.score div{box-shadow:inset 0 0 0 1px var(--ring)}
+.calls th{text-transform:uppercase;letter-spacing:.07em;font-size:10px}
+.calls tbody tr:hover td{transition:background .12s ease}
+.alertbtn{background:var(--surface);box-shadow:inset 0 0 0 1px var(--ring);padding:7px 10px;font-size:12px}
+.alertbtn[aria-pressed="true"]{box-shadow:inset 0 0 0 1px var(--good);color:var(--good-ink);background:color-mix(in srgb,var(--good) 10%,var(--surface))}
+.switch-disclosure{position:relative}
+.switch-disclosure>summary{list-style:none;display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;padding:7px 11px;border-radius:9px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--ring);font-size:12px;color:var(--ink-2)}
+.switch-disclosure>summary::-webkit-details-marker{display:none}
+.switch-disclosure>summary::after{content:"＋";color:var(--brain);font-weight:600}
+.switch-disclosure[open]>summary::after{content:"−"}
+.switch-disclosure[open] .ctrls{position:absolute;right:0;top:calc(100% + 9px);z-index:18;width:min(520px,calc(100vw - 32px));padding:12px;border-radius:14px;background:var(--surface);box-shadow:0 18px 48px rgba(0,0,0,.4),inset 0 0 0 1px var(--ring)}
+.switch-disclosure .switch-note{grid-column:1/-1;margin:0 0 4px;color:var(--muted);font-size:11px}
+.switch-disclosure .ctrls{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.switch-disclosure .ctrls .alertbtn{text-align:left;min-height:38px}
+.scroll,.callwrap{overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:var(--axis) transparent}
+.scroll::-webkit-scrollbar,.callwrap::-webkit-scrollbar{width:7px;height:7px}
+.scroll::-webkit-scrollbar-thumb,.callwrap::-webkit-scrollbar-thumb{background:var(--axis);border-radius:8px}
+.live-pnl-chip{display:inline-flex;align-items:center;gap:8px;max-width:250px;padding:7px 11px;border:1px solid var(--grid);border-radius:10px;background:var(--surface);color:var(--ink-2);text-decoration:none;font:600 11px/1.2 "IBM Plex Sans",sans-serif;letter-spacing:.035em;white-space:nowrap;transition:transform .18s ease,box-shadow .18s ease,color .18s ease}
+.live-pnl-chip:hover{transform:translateY(-1px);box-shadow:0 5px 18px var(--glow)}
+.live-pnl-led{width:8px;height:8px;flex:none;border-radius:50%;background:var(--muted)}
+.live-pnl-chip.tone-positive{color:var(--good-ink);border-color:color-mix(in srgb,var(--good) 50%,var(--grid));background:color-mix(in srgb,var(--good) 10%,var(--surface))}
+.live-pnl-chip.tone-positive .live-pnl-led{background:var(--good);box-shadow:0 0 12px var(--good)}
+.live-pnl-chip.tone-negative{color:var(--crit);border-color:color-mix(in srgb,var(--crit) 48%,var(--grid));background:color-mix(in srgb,var(--crit) 9%,var(--surface))}
+.live-pnl-chip.tone-negative .live-pnl-led{background:var(--crit);box-shadow:0 0 12px var(--crit)}
+#trade{position:relative;overflow:hidden;transition:border-color .3s ease,box-shadow .3s ease,background .3s ease}
+#trade[data-pnl-tone="positive"]{border-color:color-mix(in srgb,var(--good) 42%,var(--grid));background:linear-gradient(145deg,color-mix(in srgb,var(--good) 9%,var(--surface)),var(--surface) 65%)}
+#trade[data-pnl-tone="negative"]{border-color:color-mix(in srgb,var(--crit) 42%,var(--grid));background:linear-gradient(145deg,color-mix(in srgb,var(--crit) 9%,var(--surface)),var(--surface) 65%)}
+#trade.trade-pulse[data-pnl-tone="positive"]{animation:trade-positive-pulse 900ms ease-out}
+#trade.trade-pulse[data-pnl-tone="negative"]{animation:trade-negative-pulse 900ms ease-out}
+@keyframes trade-positive-pulse{0%{box-shadow:0 0 0 1px var(--good),0 0 0 0 color-mix(in srgb,var(--good) 48%,transparent)}45%{box-shadow:0 0 0 1px var(--good),0 0 32px 4px color-mix(in srgb,var(--good) 24%,transparent)}100%{box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 0 0 1px color-mix(in srgb,var(--good) 42%,var(--grid)),0 12px 32px rgba(0,0,0,.12)}}
+@keyframes trade-negative-pulse{0%{box-shadow:0 0 0 1px var(--crit),0 0 0 0 color-mix(in srgb,var(--crit) 48%,transparent)}45%{box-shadow:0 0 0 1px var(--crit),0 0 32px 4px color-mix(in srgb,var(--crit) 24%,transparent)}100%{box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 0 0 1px color-mix(in srgb,var(--crit) 42%,var(--grid)),0 12px 32px rgba(0,0,0,.12)}}
+.trade-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin:3px 0 10px}
+.trade-instrument{min-width:0;font:600 20px/1.2 "IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;overflow-wrap:anywhere}
+.trade-status{display:inline-flex;align-items:center;gap:6px;flex:none;padding:6px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.trade-status.positive{color:var(--good-ink);background:color-mix(in srgb,var(--good) 14%,var(--surface))}
+.trade-status.negative{color:var(--crit);background:color-mix(in srgb,var(--crit) 13%,var(--surface))}
+.trade-status.neutral{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,var(--surface))}
+.trade-pnl-panel{position:relative;overflow:hidden;margin:10px 0 12px;padding:14px 15px 12px;border-radius:13px;background:color-mix(in srgb,var(--surface-2) 82%,transparent);box-shadow:inset 0 0 0 1px var(--ring)}
+.trade-pnl-panel::after{content:"";position:absolute;right:-50px;top:-78px;width:170px;height:170px;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb,var(--brain) 13%,transparent),transparent 68%);pointer-events:none}
+.trade-pnl-caption{font-size:9px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+.trade-pnl-value{display:flex;align-items:baseline;gap:7px;margin-top:2px;font:600 clamp(32px,3.1vw,43px)/1.05 "IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;letter-spacing:-.025em;transition:color .25s ease}
+.trade-pnl-value.positive{color:var(--good-ink)}.trade-pnl-value.negative{color:var(--crit)}.trade-pnl-value.neutral{color:var(--ink)}
+.trade-pnl-value small{font:500 12px/1.2 "IBM Plex Sans",sans-serif;color:var(--ink-2);letter-spacing:0}
+.trade-pnl-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:11px}
+.trade-pnl-stats>div{min-width:0;display:flex;flex-direction:column;gap:2px}
+.trade-pnl-stats span{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.trade-pnl-stats b{font-size:13px;overflow-wrap:anywhere}
+.risk-rail{margin:14px 2px 12px}
+.risk-rail-labels{display:flex;justify-content:space-between;gap:6px;font-size:9px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.risk-rail-track{height:8px;position:relative;margin:9px 4px 7px;border-radius:99px;background:linear-gradient(90deg,color-mix(in srgb,var(--crit) 48%,var(--surface-2)),var(--surface-2) 45%,color-mix(in srgb,var(--good) 35%,var(--surface-2)));box-shadow:inset 0 0 0 1px var(--ring)}
+.risk-rail-fill{position:absolute;top:1px;height:6px;border-radius:99px;background:var(--ink-2);opacity:.5}
+.risk-rail-fill.positive{background:var(--good);opacity:.8}.risk-rail-fill.negative{background:var(--crit);opacity:.8}
+.risk-rail-entry{position:absolute;top:-3px;width:2px;height:14px;background:var(--ink);box-shadow:0 0 0 2px var(--surface);transform:translateX(-50%)}
+.risk-rail-mark{position:absolute;top:50%;width:13px;height:13px;border:2px solid var(--surface);border-radius:50%;background:var(--ink-2);box-shadow:0 0 0 1.5px var(--ink-2);transform:translate(-50%,-50%);transition:left .35s cubic-bezier(.2,.8,.2,1),background .25s ease,box-shadow .25s ease}
+.risk-rail-mark.positive{background:var(--good);box-shadow:0 0 0 1.5px var(--good),0 0 12px color-mix(in srgb,var(--good) 70%,transparent)}
+.risk-rail-mark.negative{background:var(--crit);box-shadow:0 0 0 1.5px var(--crit),0 0 12px color-mix(in srgb,var(--crit) 70%,transparent)}
+.risk-rail-prices{display:flex;justify-content:space-between;gap:8px;font-size:10px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.risk-rail-labels span:first-child{color:var(--crit)}.risk-rail-labels span:last-child{color:var(--good-ink)}
+.calls tbody tr.row-positive td{background:color-mix(in srgb,var(--good) 8%,var(--surface))}
+.calls tbody tr.row-negative td{background:color-mix(in srgb,var(--crit) 8%,var(--surface))}
+.calls tbody tr.row-positive td:first-child{box-shadow:inset 3px 0 var(--good)}
+.calls tbody tr.row-negative td:first-child{box-shadow:inset 3px 0 var(--crit)}
+.calls tbody tr.row-open td:first-child::after{content:"LIVE";display:inline-block;margin-left:6px;padding:1px 5px;border-radius:99px;background:var(--brain-wash);color:var(--brain);font-size:8px;font-weight:700;letter-spacing:.06em;vertical-align:1px}
+.trade-rationale{margin-top:9px;border-top:1px solid var(--grid);padding-top:9px}
+.trade-rationale summary{cursor:pointer;color:var(--brain);font-size:11px;font-weight:600}
+.trade-rationale[open] summary{margin-bottom:8px}
+.trade-rationale .why{margin-top:6px}
+#mode-performance{background:linear-gradient(120deg,color-mix(in srgb,var(--surface) 93%,var(--brain) 7%),var(--surface))}
+#mode-performance h2::before{content:"◈";color:var(--brain);margin-right:8px}
+.mode-archive{margin-top:16px;padding:16px;border-radius:13px;background:color-mix(in srgb,var(--surface-2) 50%,var(--surface));box-shadow:inset 0 0 0 1px var(--ring)}
+.mode-archive-head{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.mode-archive-head>div{flex:1;min-width:200px;margin-right:auto}
+.mode-archive-head h3{margin:0;font:600 15px/1.25 "IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;letter-spacing:.025em}
+.mode-archive-head p{margin:3px 0 0;color:var(--muted);font-size:11.5px}
+.mode-archive-head label{display:grid;gap:4px;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.mode-archive-head select{min-width:148px;font-size:12px;text-transform:none;letter-spacing:0}
+.mode-archive-head select:disabled{opacity:.5}
+.mode-archive-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}
+.mode-archive-kpi{min-width:0;padding:11px 12px;border-radius:10px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--ring)}
+.mode-archive-kpi span{display:block;color:var(--muted);font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.mode-archive-kpi b{display:block;margin-top:3px;font:600 20px/1.1 "IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;overflow-wrap:anywhere}
+.mode-archive-rules{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0}
+.mode-archive-rules span{padding:3px 7px;border-radius:999px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--ring);font-size:9px;color:var(--ink-2)}
+.mode-archive-rules .on{color:var(--good-ink)}.mode-archive-rules .off{color:var(--muted)}
+.mode-archive-empty{padding:20px;border:1px dashed var(--axis);border-radius:10px;color:var(--muted);font-size:12px;text-align:center}
+#signals[data-pnl-tone="positive"] .sig-state{background:color-mix(in srgb,var(--good) 9%,var(--surface-2));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--good) 32%,var(--ring))}
+#signals[data-pnl-tone="negative"] .sig-state{background:color-mix(in srgb,var(--crit) 9%,var(--surface-2));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--crit) 32%,var(--ring))}
+#trade.trade-pulse .trade-pnl-value{animation:pnl-value-pop 520ms cubic-bezier(.2,.8,.2,1)}
+@keyframes pnl-value-pop{0%{transform:scale(.98);filter:brightness(1)}42%{transform:scale(1.035);filter:brightness(1.35)}100%{transform:scale(1);filter:brightness(1)}}
+footer{padding-top:12px;border-top:1px solid var(--grid)}
+@media(max-width:760px){html{scroll-padding-top:16px}.wrap{padding-right:12px;padding-left:12px}header{margin-right:-12px;margin-left:-12px;padding:10px 12px}.section-nav{margin-bottom:12px}.live-pnl-chip{max-width:100%;order:2}.switch-disclosure[open] .ctrls{right:auto;left:0}.section-heading{margin-top:20px}.trade-pnl-value{font-size:36px}.mode-archive-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.mode-archive-head>div{flex-basis:100%}.mode-archive-head label{flex:1}}
+@media(prefers-reduced-motion:reduce){.tab,.alertbtn,.rbtn{transition:none}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@media(prefers-reduced-motion:reduce){#trade,#trade .risk-rail-mark{transition:none}#trade.trade-pulse,#trade.trade-pulse .trade-pnl-value{animation:none}}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div class="brand" id="brand"><span class="mark" aria-hidden="true"></span>
-      <div><h1>Trade Brain</h1><div class="tag">NIFTY + SENSEX options · signals only, never orders</div></div></div>
+      <div><h1>Trade Brain</h1><div class="tag">NIFTY + SENSEX options · signal research · owner-only broker execution</div></div></div>
     <span class="pill" id="mode"><span class="dot"></span><span>connecting…</span></span>
     <span class="pill" id="market"><span class="dot"></span><span>market —</span></span>
     <span class="pill" id="feed"><span class="dot"></span><span>feed —</span></span>
+    <a class="live-pnl-chip tone-neutral" id="live-pnl-chip" href="#trade-view" title="Signal P&amp;L per lot, marked at the option bid and after estimated costs"><span class="live-pnl-led"></span><span id="live-pnl-text">NO OPEN SIGNAL</span></a>
     <span class="pill" id="age" title="Screen age: how old the snapshot on screen is. Exchange: time since the index last ticked at the exchange. Upstox→us: median delay from Upstox's server stamp to our receipt (includes clock skew)."><span class="dot"></span><span>data age —</span></span>
     <span class="spacer"></span>
     <div class="tabs" role="tablist" id="tabs"></div>
     <select id="expiry" aria-label="Expiry"></select>
-    <div class="ctrls" role="group" aria-label="Brain switches">
     <select id="mode-picker" title="Sets every switch below at once. These are TRADE-OFFS, not a guarantee of more profit: Conservative trades less often but only in clearer conditions; Aggressive trades more often, including conditions the data shows are historically weaker.">
       <option value="">— choose a mode —</option>
       <option value="conservative">🐢 Conservative: fewest, highest-confidence trades</option>
       <option value="balanced">⚖️ Balanced: today's proven default (most track record)</option>
       <option value="aggressive">🐇 Aggressive: more trade volume, more risk (not more win%)</option>
+      <option value="custom">⚙️ Custom switches</option>
     </select>
+    <details class="switch-disclosure">
+      <summary>Custom switches</summary>
+      <div class="ctrls" role="group" aria-label="Brain switches">
+      <p class="switch-note">Fine tune the selected profile. Changes apply to new signals.</p>
     <button class="alertbtn" id="sw-afternoon" aria-pressed="false" data-key="allow_afternoon" title="After 12:00 the brain stops issuing NEW calls (9 live days 19-30 Oct: 12:00-13:59 pnl -9,316, 14:00+ pnl -7,924). Turn on to keep getting calls until 14:45. Blocked calls are still tracked as shadows.">🌇 Afternoon calls: off</button>
     <button class="alertbtn" id="sw-dd" aria-pressed="true" data-key="dd_stop" title="Drawdown stop: once today's closed calls have been +2R or more and then give back 2R, no new calls for the rest of the day. Blocked calls are still tracked as shadows.">🛑 Drawdown stop: on</button>
     <button class="alertbtn" id="sw-t1check" aria-pressed="false" data-key="t1_direction_check" title="At T1: re-check trend/VWAP and the last 2 candles. If the move is turning against the trade, exit now and lock the T1-level profit instead of riding to breakeven/T2. Off by default while we collect evidence.">🎯 T1 direction check: off</button>
@@ -223,9 +381,16 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     <button class="alertbtn" id="sw-eventcal" aria-pressed="false" data-key="event_calendar_gate" title="Block new calls around known scheduled events (RBI MPC, Union Budget, FOMC reaction mornings) - this engine only buys premium, so IV crush after a scheduled announcement can lose money even when direction is right. Dates are hardcoded from each body's own official calendar and need an annual refresh. Off by default.">📅 Event calendar: off</button>
     <button class="alertbtn" id="alerts" aria-pressed="false" title="Sound + desktop notification on new calls, T1, SL">🔕 Alerts off</button>
     </div>
+    </details>
     <button class="themebtn" id="theme" title="Toggle theme">◐ theme</button>
   </header>
 
+  <nav class="section-nav" aria-label="Dashboard sections">
+    <a href="#snapshot">Overview</a><a href="#decision-desk">Decision desk</a><a href="#trade-view">Live trades</a>
+    <a href="#strategy-lab">Strategy lab</a><a href="#market-internals">Market internals</a><a href="#archive">History</a>
+  </nav>
+
+  <div class="section-heading" id="snapshot"><span class="section-index">01</span><div><h2>Market snapshot</h2><p>Live price, volatility and positioning at a glance.</p></div><span class="section-rule"></span></div>
   <section class="grid tiles" id="tiles"></section>
 
   <section class="grid" id="realWrap" style="display:none;grid-template-columns:minmax(0,1fr);margin-bottom:14px">
@@ -235,6 +400,25 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     </div>
   </section>
 
+  <div class="section-heading" id="decision-desk"><span class="section-index">02</span><div><h2>Decision desk</h2><p>See the live call, its evidence and the checks controlling new entries.</p></div><span class="section-rule"></span></div>
+  <section class="grid row2">
+    <div class="card" id="signals">
+      <h2>Brain thinking · live</h2>
+      <div class="sig-state"><span class="dot warn" id="sigDot"></span><span id="sigState">—</span> <span class="badge exp" id="sigLabel"></span></div>
+      <div class="sides" id="sides"></div>
+      <div class="gates" id="gates"></div>
+      <div class="daybar" id="daybar"></div>
+      <div class="callwrap"><table class="calls" id="callsTbl"></table></div>
+      <div class="note" id="sigReason"></div>
+    </div>
+    <div class="card" id="brain">
+      <h2>Brain layers</h2>
+      <svg viewBox="0 0 760 170" role="img" aria-label="Brain layer status"></svg>
+      <div class="layer-detail" id="layerDetail">Hover a layer to see what it does. Flow: see → remember → read the day → learned patterns → decide → safety checks → review.</div>
+    </div>
+  </section>
+
+  <div class="section-heading" id="trade-view"><span class="section-index">03</span><div><h2>Live trade view</h2><p>Read the underlying move beside the active option position.</p></div><span class="section-rule"></span></div>
   <section class="grid row-chart">
     <div class="card">
       <h2 id="chartTitle">Live chart</h2>
@@ -263,24 +447,24 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     </div>
   </section>
 
-  <section class="grid row2">
-    <div class="card" id="brain">
-      <h2>Brain layers</h2>
-      <svg viewBox="0 0 760 170" role="img" aria-label="Brain layer status"></svg>
-      <div class="layer-detail" id="layerDetail">Hover a layer to see what it does. Flow: see → remember → read the day → learned patterns → decide → safety checks → review.</div>
-    </div>
-    <div class="card" id="signals">
-      <h2>Brain thinking · live</h2>
-      <div class="sig-state"><span class="dot warn" id="sigDot"></span><span id="sigState">—</span> <span class="badge exp" id="sigLabel"></span></div>
-      <div class="sides" id="sides"></div>
-      <div class="gates" id="gates"></div>
-      <div class="daybar" id="daybar"></div>
-      <div class="callwrap"><table class="calls" id="callsTbl"></table></div>
-      <div class="note" id="sigReason"></div>
-    </div>
+  <div class="section-heading" id="strategy-lab"><span class="section-index">04</span><div><h2>Strategy lab</h2><p>Compare how each profile would have traded today.</p></div><span class="section-rule"></span></div>
+  <section class="grid" style="grid-template-columns:minmax(0,1fr);margin-bottom:16px">
+    <div class="card" id="mode-performance">
+      <h2>Today's mode comparison</h2>
+      <div class="note">All three profiles run against the same feed. Unselected profiles are modeled counterfactuals (entry at ask, exits marked at bid, estimated costs); only the selected profile can send new real entries. Results are not broker fills.</div>
+      <div class="scroll"><table class="calls" id="mode-summary"></table></div>
+      <div class="scroll" style="margin-top:10px"><table class="calls" id="mode-trades"></table></div>
+      <div class="mode-archive" id="mode-archive">
+        <div class="mode-archive-head"><div><h3>Past sessions</h3><p>Choose a profile and date to inspect its modeled trades and return.</p></div>
+          <label>Profile<select id="mode-history-mode" aria-label="Archived strategy profile"><option value="conservative">Conservative</option><option value="balanced" selected>Balanced</option><option value="aggressive">Aggressive</option><option value="custom">Custom</option></select></label>
+          <label>Session<select id="mode-history-day" aria-label="Archived session date" disabled><option>Loading history…</option></select></label></div>
+        <div id="mode-history-content"><div class="empty">Loading archived mode results…</div></div>
+        <div class="note">Mode results are simulated signal outcomes, marked at the option bid after estimated costs. They are not broker fills or realized account P&amp;L. Daily records are stored in MongoDB.</div>
+      </div>
     </div>
   </section>
 
+  <div class="section-heading" id="market-internals"><span class="section-index">05</span><div><h2>Market internals</h2><p>Options positioning, implied volatility and futures activity.</p></div><span class="section-rule"></span></div>
   <section class="grid row3">
     <div class="card">
       <h2>Option chain · OI ladder</h2>
@@ -315,6 +499,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     </div>
   </section>
 
+  <div class="section-heading" id="archive"><span class="section-index">06</span><div><h2>Performance archive</h2><p>Review every session and inspect signal, paper or broker results.</p></div><span class="section-rule"></span></div>
   <section class="grid" style="grid-template-columns:minmax(0,1fr)">
     <div class="card" id="history">
       <h2>Trade history · every day's calls</h2>
@@ -395,6 +580,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
   };
   const INFO = [
     ["#mode", "Brain status|LIVE = streaming market data and judging calls. LAST SESSION = recorder not running; showing the last state."],
+    ["#live-pnl-chip", "Active signal|Live modeled P&L per lot, marked at the option bid after estimated costs. See the trade window for risk levels. This is signal tracking, not your broker's realized P&L."],
     ["#market", "Exchange session|Whether the NSE/BSE F&O session is open, from Upstox."],
     ["#feed", "Data feed|Messages received from Upstox and any gaps longer than 10 seconds."],
     ["#age", "Data age|Screen: how old this snapshot is. Exchange: time since the index last ticked. Upstox→us: network delay."],
@@ -559,8 +745,11 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     const S = state.signals || {};
     const D = (S.diagnostics || {})[und];
     const open = (S.calls || []).filter((c) => c.und === und && (c.status === "open" || c.status === "t1"));
-    $("sigState").textContent = open.length ? `Call active · ${open[0].symbol}` : (D ? "Watching · no call" : "Idle");
-    $("sigDot").className = `dot ${open.length ? "good" : "warn"}`;
+    const liveSignal = open[0];
+    const tone = liveSignal ? (liveSignal.pnl_per_lot > 0 ? "positive" : liveSignal.pnl_per_lot < 0 ? "negative" : "neutral") : "neutral";
+    $("signals").dataset.pnlTone = tone;
+    $("sigState").textContent = liveSignal ? `Call active · ${liveSignal.symbol} · ${tone === "positive" ? "IN PROFIT" : tone === "negative" ? "IN LOSS" : "FLAT"}` : (D ? "Watching · no call" : "Idle");
+    $("sigDot").className = `dot ${tone === "positive" ? "good" : tone === "negative" ? "crit" : "warn"}`;
     $("sigLabel").textContent = S.label || "";
     $("sigLabel").style.display = S.label ? "" : "none";
     if (D && D.sides) {
@@ -586,6 +775,122 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     const SH = (S.shadow && S.shadow.by_blocker) || {};
     const shRows = Object.entries(SH).map(([k, v]) => `<span>${esc(k)}: ${v.n} blocked · <b class="${v.sum_r < 0 ? "pos" : v.sum_r > 0 ? "neg" : ""}">${v.sum_r < 0 ? "saved" : v.sum_r > 0 ? "cost" : "±"} ${Math.abs(v.sum_r).toFixed(2)}R</b></span>`);
     $("sigReason").innerHTML = (shRows.length ? `<div style="margin-bottom:6px"><b>Filter scorecard today</b> (shadow-tracked blocked candidates): ${shRows.join(" · ")}</div>` : "") + esc(S.reason || "");
+  }
+
+  function renderModeComparison() {
+    const C = (state.signals || {}).mode_comparison;
+    if (!C || !C.modes) {
+      $("mode-summary").innerHTML = `<tr><td style="text-align:left;color:var(--muted)">Mode comparisons appear while recording.</td></tr>`;
+      $("mode-trades").innerHTML = "";
+      return;
+    }
+    const names = {conservative: "Conservative", balanced: "Balanced", aggressive: "Aggressive", custom: "Custom"};
+    const rows = Object.entries(C.modes).map(([name, d]) => {
+      const s = d.summary || {};
+      return `<tr class="${d.selected ? "sel" : ""}"><td style="text-align:left"><b>${esc(names[name] || name)}</b>${d.selected ? " · selected for new real entries" : " · modeled"}</td>` +
+        `<td>${s.calls ?? 0}</td><td>${s.closed ?? 0}</td><td>${s.win_rate == null ? "—" : pct(s.win_rate, 0)}</td>` +
+        `<td class="${pnlCls(s.pnl_total_per_lot)}">${money(s.pnl_total_per_lot)}</td><td>${fmt(s.sum_r)}R</td></tr>`;
+    }).join("");
+    $("mode-summary").innerHTML = `<thead><tr><th style="text-align:left">Profile</th><th>Calls</th><th>Closed</th><th>Win rate</th><th>Modeled P&amp;L / lot</th><th>Sum R</th></tr></thead><tbody>${rows}</tbody>`;
+    const trades = Object.entries(C.modes).flatMap(([name, d]) => (d.calls || []).map((c) => ({name, c, selected: d.selected})))
+      .sort((a, b) => b.c.issued_ms - a.c.issued_ms);
+    if (!trades.length) { $("mode-trades").innerHTML = `<tr><td style="text-align:left;color:var(--muted)">No calls from any profile yet today.</td></tr>`; return; }
+    const body = trades.map(({name, c, selected}) => `<tr class="${c.pnl_per_lot > 0 ? "row-positive" : c.pnl_per_lot < 0 ? "row-negative" : ""}${c.status === "closed" ? "" : " row-open"}"><td style="text-align:left">${esc(names[name] || name)}${selected ? " ✓" : ""}</td>` +
+      `<td>${new Date(c.issued_ms).toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit", hour12:false})}</td>` +
+      `<td style="text-align:left">${esc(c.symbol || `${c.und} ${c.strike} ${c.kind}`)}</td><td>${fmt(c.entry)}</td>` +
+      `<td>${fmt(c.status === "closed" ? c.exit : c.last_bid)}</td><td>${esc(c.outcome || c.status)}</td>` +
+      `<td class="${pnlCls(c.pnl_per_lot)}">${money(c.pnl_per_lot)} · ${fmt(c.r_now)}R</td></tr>`).join("");
+    $("mode-trades").innerHTML = `<thead><tr><th style="text-align:left">Profile</th><th>Time</th><th style="text-align:left">Modeled trade</th><th>Entry</th><th>Exit / mark</th><th>Result</th><th>P&amp;L / lot · R</th></tr></thead><tbody>${body}</tbody>`;
+  }
+
+  const modeHistorySummaries = new Map(), modeHistoryDetails = new Map();
+  let modeHistoryStarted = false;
+  const MODE_LABEL = {conservative: "Conservative", balanced: "Balanced", aggressive: "Aggressive", custom: "Custom"};
+  const MODE_RULE_LABEL = {allow_afternoon: "Afternoon calls", dd_stop: "Drawdown stop", t1_direction_check: "T1 direction check",
+                           vol_regime_filter: "Volatility filter", regime_gate: "Regime gate", event_calendar_gate: "Event calendar"};
+  function renderModeArchiveDay(data) {
+    const root = $("mode-history-content");
+    if (!data) { root.innerHTML = `<div class="mode-archive-empty">No saved comparison for this profile and session.</div>`; return; }
+    const s = data.summary || {}, calls = data.calls || [];
+    const rules = Object.entries(data.rules || {}).filter(([k, v]) => k !== "version" && typeof v === "boolean")
+      .map(([k, v]) => `<span class="${v ? "on" : "off"}">${esc(MODE_RULE_LABEL[k] || k)} · ${v ? "ON" : "OFF"}</span>`).join("");
+    const dayLong = new Date(`${data.day}T12:00:00+05:30`).toLocaleDateString("en-IN", {weekday:"long", day:"numeric", month:"long", year:"numeric"});
+    const body = calls.map((c) => {
+      const result = c.status !== "closed" ? `<span class="oc live">${c.t1_hit ? "T1 · OPEN" : "OPEN"}</span>`
+        : `<span class="oc ${c.pnl_per_lot > 0 ? "win" : c.pnl_per_lot < 0 ? "loss" : "flat"}">${esc(c.outcome || "CLOSED")}</span>`;
+      return `<tr class="${c.pnl_per_lot > 0 ? "row-positive" : c.pnl_per_lot < 0 ? "row-negative" : ""}${c.status !== "closed" ? " row-open" : ""}">
+        <td>${esc(c.time || "—")}</td><td style="text-align:left">${esc(c.symbol || `${c.und || ""} ${c.strike || ""} ${c.kind || ""}`)}</td>
+        <td>${fmt(c.entry)}</td><td>${fmt(c.status === "closed" ? c.exit : c.last_bid)}</td><td>${result}</td>
+        <td class="${pnlCls(c.pnl_per_lot)}">${money(c.pnl_per_lot)}</td><td class="${pnlCls(c.r_now)}">${fmt(c.r_now)}R</td></tr>`;
+    }).join("");
+    root.innerHTML = `<div class="note" style="margin:0 0 8px"><b>${esc(MODE_LABEL[data.mode] || data.mode)} · ${esc(dayLong)}</b> · modeled signal results</div>
+      <div class="mode-archive-kpis">
+        <div class="mode-archive-kpi"><span>Trades</span><b>${s.calls ?? calls.length}</b></div>
+        <div class="mode-archive-kpi"><span>Win rate · closed</span><b>${s.win_rate == null ? "—" : pct(s.win_rate, 0)}</b></div>
+        <div class="mode-archive-kpi"><span>Modeled P&amp;L / lot</span><b class="${pnlCls(s.pnl_total_per_lot)}">${money(s.pnl_total_per_lot)}</b></div>
+        <div class="mode-archive-kpi"><span>Closed return</span><b>${fmt(s.sum_r)}R</b></div>
+      </div>
+      ${rules ? `<div class="mode-archive-rules" aria-label="Profile rules">${rules}</div>` : ""}
+      ${calls.length ? `<div class="scroll"><table class="calls"><thead><tr><th>Time</th><th style="text-align:left">Modeled trade</th><th>Entry</th><th>Exit / mark</th><th>Result</th><th>P&amp;L / lot</th><th>R</th></tr></thead><tbody>${body}</tbody></table></div>`
+        : `<div class="mode-archive-empty">No ${esc(MODE_LABEL[data.mode] || data.mode)} calls were issued on this session.</div>`}
+      <div class="note">${esc(data.return_basis || "Signal model: entry at ask, exits marked at bid, estimated costs.")}</div>`;
+  }
+  async function loadModeArchiveDay(mode, day, force = false) {
+    if (!mode || !day) return;
+    const key = `${mode}|${day}`;
+    if (force) modeHistoryDetails.delete(key);
+    if (modeHistoryDetails.has(key)) { renderModeArchiveDay(modeHistoryDetails.get(key)); return; }
+    $("mode-history-content").innerHTML = `<div class="empty">Loading ${esc(MODE_LABEL[mode] || mode)} · ${esc(day)}…</div>`;
+    try {
+      const r = await fetch(`/api/mode-history?mode=${encodeURIComponent(mode)}&day=${encodeURIComponent(day)}`, {cache:"no-store"});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json(), record = (j.days || []).find((d) => d.day === day);
+      if (!record) throw new Error("No saved comparison for this day");
+      modeHistoryDetails.set(key, record); renderModeArchiveDay(record);
+    } catch (e) {
+      $("mode-history-content").innerHTML = `<div class="mode-archive-empty">Could not load this archived session. ${esc(e.message)}</div>`;
+    }
+  }
+  async function loadModeArchive(mode, force = false) {
+    if (!mode) return;
+    if (force) modeHistorySummaries.delete(mode);
+    if (!modeHistorySummaries.has(mode)) {
+      $("mode-history-day").disabled = true;
+      $("mode-history-day").innerHTML = `<option>Loading history…</option>`;
+      $("mode-history-content").innerHTML = `<div class="empty">Loading ${esc(MODE_LABEL[mode] || mode)} history…</div>`;
+      try {
+        const r = await fetch(`/api/mode-history?mode=${encodeURIComponent(mode)}&days=365`, {cache:"no-store"});
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        modeHistorySummaries.set(mode, await r.json());
+      } catch (e) {
+        $("mode-history-day").innerHTML = `<option value="">Unavailable</option>`;
+        $("mode-history-content").innerHTML = `<div class="mode-archive-empty">Mode archive unavailable. ${esc(e.message)}</div>`;
+        return;
+      }
+    }
+    const records = modeHistorySummaries.get(mode).days || [];
+    const dayPicker = $("mode-history-day"), previousDay = dayPicker.value;
+    if (!records.length) {
+      dayPicker.innerHTML = `<option value="">No archived sessions</option>`; dayPicker.disabled = true;
+      $("mode-history-content").innerHTML = `<div class="mode-archive-empty">No archived ${esc(MODE_LABEL[mode] || mode)} sessions yet. Daily comparisons are saved while the recorder runs.</div>`;
+      return;
+    }
+    dayPicker.innerHTML = records.map((d) => {
+      const label = new Date(`${d.day}T12:00:00+05:30`).toLocaleDateString("en-IN", {weekday:"short", day:"2-digit", month:"short", year:"numeric"});
+      return `<option value="${esc(d.day)}">${esc(label)} · ${d.summary?.calls ?? 0} trades</option>`;
+    }).join("");
+    dayPicker.disabled = false;
+    dayPicker.value = records.some((d) => d.day === previousDay) ? previousDay : records[0].day;
+    await loadModeArchiveDay(mode, dayPicker.value, force);
+  }
+  $("mode-history-mode").onchange = (e) => loadModeArchive(e.target.value);
+  $("mode-history-day").onchange = (e) => loadModeArchiveDay($("mode-history-mode").value, e.target.value);
+  async function startModeHistory() {
+    if (modeHistoryStarted) return;
+    modeHistoryStarted = true;
+    const mode = detectMode() || "balanced";
+    $("mode-history-mode").value = mode;
+    await loadModeArchive(mode);
   }
 
   // ---------- candlestick chart (shared by index + option) ----------
@@ -844,7 +1149,9 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
       const now = c.status === "closed" ? c.exit : c.last_bid;
       const X = state.execution;
       const books = X ? `<td>${bookCell((X.paper.trades || {})[c.id], false)}</td><td>${bookCell((X.real.trades || {})[c.id], true)}</td>` : "";
-      return `<tr data-id="${esc(c.id)}" class="${c.id === selectedCall ? "sel" : ""}">
+      const pnlTone = c.pnl_per_lot > 0 ? "row-positive" : c.pnl_per_lot < 0 ? "row-negative" : "";
+      const liveRow = c.status === "closed" ? "" : "row-open";
+      return `<tr data-id="${esc(c.id)}" class="${[c.id === selectedCall ? "sel" : "", pnlTone, liveRow].filter(Boolean).join(" ")}">
         <td style="text-align:left">${esc(t)}</td>
         <td style="text-align:left">${c.dir > 0 ? "▲" : "▼"} ${esc(c.und)} ${fmt(c.strike, 0)} ${esc(c.kind)} <span class="sub">${esc((c.expiry || "").slice(5))}</span></td>
         <td>${fmt(c.entry)}</td><td>${fmt(now)}</td><td>${outcomeChip(c)}</td>
@@ -861,33 +1168,82 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     });
   }
 
+  let tradeAnimationMemo = null, tradePulseTimer = null;
   function renderTrade() {
     const S = state.signals || {};
     const calls = (S.calls || []).filter((c) => c.und === und);
+    const activeCall = calls.find((x) => x.status === "open" || x.status === "t1");
+    const chip = $("live-pnl-chip");
+    chip.classList.remove("tone-positive", "tone-negative", "tone-neutral");
+    if (activeCall) {
+      const activeTone = activeCall.pnl_per_lot > 0 ? "positive" : activeCall.pnl_per_lot < 0 ? "negative" : "neutral";
+      chip.classList.add(`tone-${activeTone}`);
+      $("live-pnl-text").textContent = `${und} · ${activeTone === "positive" ? "▲ PROFIT" : activeTone === "negative" ? "▼ LOSS" : "● FLAT"} ${money(activeCall.pnl_per_lot)} / LOT`;
+    } else {
+      chip.classList.add("tone-neutral");
+      $("live-pnl-text").textContent = `NO OPEN ${und} SIGNAL`;
+    }
     const c = (selectedCall && (S.calls || []).find((x) => x.id === selectedCall)) || calls.find((x) => x.status === "open" || x.status === "t1") || calls[0];
-    if (!c) { $("tradeBody").innerHTML = `<div class="empty">No call yet. When every gate passes, the call appears here with its option, expiry, entry, SL and targets.</div>`; $("optChart").innerHTML = ""; return; }
+    if (!c) { $("trade").dataset.pnlTone = "neutral"; $("trade").classList.remove("trade-pulse"); clearTimeout(tradePulseTimer); $("tradeBody").innerHTML = `<div class="empty">No call yet. When every gate passes, the call appears here with its option, expiry, entry, SL and targets.</div>`; $("optChart").innerHTML = ""; return; }
     const live = c.status !== "closed";
     const left = live ? Math.max(0, (c.time_stop_ms - Date.now()) / 60000) : 0;
-    const heroCls = c.pnl_per_lot > 0 ? "up" : c.pnl_per_lot < 0 ? "down" : "";
+    const pnlValue = Number(c.pnl_per_lot);
+    const tone = !Number.isFinite(pnlValue) ? "neutral" : pnlValue > 0 ? "positive" : pnlValue < 0 ? "negative" : "neutral";
+    const nowMs = Date.now(), previous = tradeAnimationMemo;
+    let pulse = live && (!previous || previous.id !== c.id);
+    if (live && previous && previous.id === c.id) {
+      const crossed = previous.tone !== tone && tone !== "neutral";
+      const baseline = Number.isFinite(previous.pulsePnl) ? previous.pulsePnl : previous.pnl;
+      const changed = Number.isFinite(pnlValue) && Number.isFinite(baseline) && Math.abs(pnlValue - baseline) >= Math.max(25, Math.abs(baseline) * 0.12);
+      const cooldown = nowMs - previous.pulseAt;
+      pulse = (crossed && cooldown >= 2500) || (changed && cooldown >= 4500);
+    }
+    const pulseAt = pulse ? nowMs : previous && previous.id === c.id ? previous.pulseAt : nowMs;
+    const pulsePnl = pulse ? pnlValue : previous && previous.id === c.id ? previous.pulsePnl : pnlValue;
+    tradeAnimationMemo = {id: c.id, tone, pnl: Number.isFinite(pnlValue) ? pnlValue : null, pulsePnl: Number.isFinite(pulsePnl) ? pulsePnl : null, pulseAt};
+    const tradeCard = $("trade");
+    tradeCard.dataset.pnlTone = tone;
+    if (pulse) {
+      tradeCard.classList.remove("trade-pulse");
+      void tradeCard.offsetWidth;
+      tradeCard.classList.add("trade-pulse");
+      clearTimeout(tradePulseTimer);
+      tradePulseTimer = setTimeout(() => tradeCard.classList.remove("trade-pulse"), 950);
+    } else if (!live) {
+      clearTimeout(tradePulseTimer);
+      tradeCard.classList.remove("trade-pulse");
+    }
+    const statusText = live ? (tone === "positive" ? "IN PROFIT" : tone === "negative" ? "IN LOSS" : "FLAT") : `CLOSED · ${c.outcome || "FLAT"}`;
+    const bidValue = c.last_bid == null ? NaN : Number(c.last_bid);
+    const activeStopPremium = c.p_sl_active ?? c.p_sl;
+    const slValue = activeStopPremium == null ? NaN : Number(activeStopPremium), t1Value = c.p_t1 == null ? NaN : Number(c.p_t1);
+    const entryValue = c.entry == null ? NaN : Number(c.entry);
+    const railValid = [bidValue, slValue, t1Value, entryValue].every(Number.isFinite) && t1Value > slValue;
+    const railPct = (v) => Math.max(0, Math.min(100, (v - slValue) / (t1Value - slValue) * 100));
+    const entryPct = railValid ? railPct(entryValue) : 0, bidPct = railValid ? railPct(bidValue) : 0;
+    const fillLeft = Math.min(entryPct, bidPct), fillWidth = Math.abs(bidPct - entryPct);
     const lots = c.size_hint_lots === null || c.size_hint_lots === undefined ? `risk ₹${fmt(c.risk_per_lot, 0)} / lot` : (c.size_hint_lots > 0 ? `${c.size_hint_lots} lot(s) within your risk budget` : "1 lot exceeds your risk budget");
     $("tradeBody").innerHTML = `
-      <div><span class="badge exp">${esc(c.label)}</span> <span class="badge">${live ? (c.t1_hit ? "T1 HIT · stop at breakeven" : "OPEN") : esc(c.outcome)}</span> <span class="badge">score ${c.score}/${c.max_score}</span></div>
-      <div style="margin-top:8px;font-size:18px;font-weight:600">${esc(c.action)} · ${esc(c.symbol)}</div>
+      <div><span class="badge exp">${esc(c.label)}</span> <span class="badge">${live ? (c.t1_hit ? "T1 HIT · stop at breakeven" : "OPEN POSITION") : esc(c.outcome)}</span> <span class="badge">score ${c.score}/${c.max_score}</span></div>
+      <div class="trade-head"><div class="trade-instrument">${esc(c.action)} · ${esc(c.symbol)}</div><span class="trade-status ${tone}"><span>${tone === "positive" ? "↗" : tone === "negative" ? "↘" : "•"}</span>${statusText}</span></div>
       <div class="sub" style="color:var(--ink-2)">Lot ${c.lot} · issued ${new Date(c.issued_ms).toLocaleTimeString("en-IN")} · ${live ? `time stop in ${left.toFixed(0)} min` : `closed ${c.exit_ms ? new Date(c.exit_ms).toLocaleTimeString("en-IN") : ""}`}</div>
       ${selectedCall ? `<div class="sub" style="margin:6px 0">Viewing a past call · click it again in the list to return to the live call</div>` : ""}
-      <div class="hero ${heroCls}" style="margin-top:8px">${signed(c.pnl_per_lot, (x) => "₹" + fmt(x, 0))}<span style="font-size:16px;color:var(--ink-2);font-weight:500"> / lot · ${fmt(c.r_now)}R</span></div>
-      <div class="sub">bid now ${fmt(c.last_bid)} vs entry ${fmt(c.entry)} · best ₹${fmt(c.mfe, 0)} · worst ₹${fmt(c.mae, 0)} · after est. costs ₹${fmt(c.cost_est_per_lot, 0)}/lot</div>
+      <div class="trade-pnl-panel">
+        <div class="trade-pnl-caption">Net signal P&amp;L · marked at bid · estimated costs included</div>
+        <div class="trade-pnl-value ${tone}">${money(c.pnl_per_lot)}<small>per lot · ${fmt(c.r_now)}R</small></div>
+      <div class="trade-pnl-stats"><div><span>Live bid</span><b>${fmt(c.last_bid)}</b></div><div><span>Entry</span><b>${fmt(c.entry)}</b></div><div><span>Open excursion</span><b>${money(c.mfe)} / ${money(c.mae)}</b></div></div>
+      </div>
+      ${railValid ? `<div class="risk-rail" aria-label="Option premium position from active stop to target one"><div class="risk-rail-labels"><span>${c.t1_hit ? "BE stop" : "Stop"}</span><span>Entry → target 1</span><span>T1</span></div><div class="risk-rail-track"><span class="risk-rail-fill ${tone}" style="left:${fillLeft}%;width:${fillWidth}%"></span><span class="risk-rail-entry" style="left:${entryPct}%"></span><span class="risk-rail-mark ${tone}" style="left:${bidPct}%"></span></div><div class="risk-rail-prices"><span>${fmt(activeStopPremium)}</span><span>Now ${fmt(c.last_bid)} · entry ${fmt(c.entry)}</span><span>${fmt(c.p_t1)}</span></div></div>` : ""}
       <div class="lv"><span class="h"></span><span class="h">Option premium</span><span class="h">${esc(c.und)} level</span>
         <span>Entry</span><span>${fmt(c.entry)} <span class="sub">(zone ${fmt(c.entry_zone[0])}–${fmt(c.entry_zone[1])})</span></span><span>${fmt(c.u_entry, 1)}</span>
-        <span style="color:var(--crit)">Stop loss</span><span>${fmt(c.p_sl)}</span><span>${fmt(c.u_sl, 1)}${c.t1_hit ? " → BE " + fmt(c.u_sl_active, 1) : ""}</span>
+        <span style="color:var(--crit)">${c.t1_hit ? "Breakeven stop" : "Stop loss"}</span><span>${fmt(activeStopPremium)}</span><span>${fmt(c.u_sl_active ?? c.u_sl, 1)}${c.t1_hit ? " · locked at entry" : ""}</span>
         <span style="color:var(--good-ink)">Target 1</span><span>${fmt(c.p_t1)}</span><span>${fmt(c.u_t1, 1)}</span>
         <span style="color:var(--good-ink)">Target 2</span><span>${fmt(c.p_t2)}</span><span>${fmt(c.u_t2, 1)}</span></div>
       <div class="sub">Net R:R to T1 ${fmt(c.rr_net)} · ${esc(lots)} · IV at entry ${pct(c.iv_at_entry, 1)}${c.stop_via ? ` · stopped via ${esc(c.stop_via)} level` : ""}</div>
-      ${(c.correlated_with || []).length ? `<div style="margin-top:6px;font-size:12.5px;color:var(--ink)">⚠ <b>Correlated:</b> same-direction call already open on ${esc(c.correlated_with.join(", "))} — Nifty and Sensex move together, so taking both is one bet at double risk.</div>` : ""}
-      <div style="margin-top:8px;font-size:12px;color:var(--ink)"><b>Why</b> · trigger: ${esc(c.trigger)}</div>
-      <ul class="why">${(c.reasons || []).map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
-      ${(c.evidence || []).length ? `<div style="font-size:12px;margin-top:6px"><b>Evidence · big prints on this side</b> <span class="sub">(exchange data is anonymous: what, how much, when — never who)</span></div><ul class="ev">${c.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>` : ""}`;
-    const plines = [{y: c.entry, kind: "entry", label: `IN ${fmt(c.entry, 1)}`}, {y: c.p_sl, kind: "sl", label: `SL ${fmt(c.p_sl, 1)}`},
+      ${(c.correlated_with || []).length ? `<div style="margin-top:6px;font-size:12px;color:var(--warn)">⚠ <b>Correlated risk:</b> same-direction position already open on ${esc(c.correlated_with.join(", "))} — combining them concentrates exposure.</div>` : ""}
+      <details class="trade-rationale"><summary>Trade thesis · trigger, clues and tape evidence</summary><div style="font-size:12px"><b>Trigger</b> · ${esc(c.trigger)}</div><ul class="why">${(c.reasons || []).map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
+      ${(c.evidence || []).length ? `<div style="font-size:12px;margin-top:6px"><b>Big prints on this side</b> <span class="sub">(anonymous exchange data)</span></div><ul class="ev">${c.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>` : ""}</details>`;
+    const plines = [{y: c.entry, kind: "entry", label: `IN ${fmt(c.entry, 1)}`}, {y: activeStopPremium, kind: "sl", label: `${c.t1_hit ? "BE" : "SL"} ${fmt(activeStopPremium, 1)}`},
                     {y: c.p_t1, kind: "t", label: `T1 ${fmt(c.p_t1, 1)}`}, {y: c.p_t2, kind: "t", label: `T2 ${fmt(c.p_t2, 1)}`}];
     if (c.last_bid) plines.push({y: c.last_bid, kind: "last", label: fmt(c.last_bid, 1)});
     drawCandles($("optChart"), c.candles || [], {W: 480, H: 220, dp: 1, lines: plines, markers: [{t: c.issued_ms, dir: 1}], empty: "Premium candles appear as the option trades"});
@@ -925,7 +1281,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     let body = "";
     for (const D of H.days) {
       const open = histOpen.has(D.day);
-      body += `<tr class="day${open ? " open" : ""}" data-day="${esc(D.day)}"><td style="text-align:left">${esc(fmtDay(D.day))}</td>` +
+      body += `<tr class="day${open ? " open" : ""}${D.pnl_per_lot > 0 ? " row-positive" : D.pnl_per_lot < 0 ? " row-negative" : ""}" data-day="${esc(D.day)}"><td style="text-align:left">${esc(fmtDay(D.day))}</td>` +
         `<td>${D.calls}</td><td>${D.wins}W / ${D.losses}L${D.open ? ` · ${D.open} open` : ""}</td>` +
         `<td>${D.win_rate != null ? Math.round(D.win_rate * 100) + "%" : "—"}</td>` +
         `<td class="${cls(D.sum_r)}">${rr(D.sum_r)}</td><td class="${cls(D.pnl_per_lot)}">${inr(D.pnl_per_lot)}</td></tr>`;
@@ -934,7 +1290,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
         for (const t of D.trades) {
           const res = t.status !== "closed" ? `<span class="oc live">${esc(t.status)}</span>`
             : `<span class="oc ${t.pnl_per_lot > 0 ? "win" : t.pnl_per_lot < 0 ? "loss" : "flat"}">${esc(t.outcome || "—")}</span>`;
-          inner += `<tr><td style="text-align:left">${esc(t.time || "")}${t.exit_time ? "→" + esc(t.exit_time) : ""}</td>` +
+          inner += `<tr class="${t.pnl_per_lot > 0 ? "row-positive" : t.pnl_per_lot < 0 ? "row-negative" : ""}${t.status !== "closed" ? " row-open" : ""}"><td style="text-align:left">${esc(t.time || "")}${t.exit_time ? "→" + esc(t.exit_time) : ""}</td>` +
             `<td style="text-align:left">${t.dir > 0 ? "▲" : "▼"} ${esc(t.symbol || t.und)}</td>` +
             `<td>${t.entry != null ? Number(t.entry).toFixed(2) : "—"} → ${t.exit != null ? Number(t.exit).toFixed(2) : "—"}</td>` +
             `<td>${lotVal(t)}</td>` +
@@ -984,6 +1340,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
                    vol_regime_filter: false, regime_gate: false, event_calendar_gate: false},
   };
   function detectMode() {
+    if (["conservative", "balanced", "aggressive", "custom"].includes(ruleSettings.mode)) return ruleSettings.mode;
     for (const [name, cfg] of Object.entries(MODES)) {
       if (Object.entries(cfg).every(([k, v]) => (k in ruleSettings ? ruleSettings[k] : SW[k][2]) === v)) return name;
     }
@@ -1003,8 +1360,9 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     if (mp && document.activeElement !== mp) mp.value = detectMode();
   }
   async function loadSwitches() {
-    try { const r = await fetch("/api/settings", {cache: "no-store"}); if (!r.ok) return;
-          const j = await r.json(); ruleSettings = j.settings || {}; ruleCanEdit = !!j.can_edit; paintSwitches(); } catch {}
+    try { const r = await fetch("/api/settings", {cache: "no-store"}); if (!r.ok) { startModeHistory(); return; }
+          const j = await r.json(); ruleSettings = j.settings || {}; ruleCanEdit = !!j.can_edit; paintSwitches(); startModeHistory(); }
+    catch { startModeHistory(); }
   }
   for (const [key, [id, , dflt]] of Object.entries(SW)) {
     const b = $(id); if (!b) continue;
@@ -1023,18 +1381,26 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
     };
   }
   loadSwitches();
+  setInterval(() => { if (modeHistoryStarted) loadModeArchive($("mode-history-mode").value, true); }, 60_000);
 
   // ---------- mode picker: sets every switch at once (trade-offs, not a profit guarantee) ----------
   $("mode-picker").onchange = async (e) => {
     const name = e.target.value;
     if (!name) return;
     if (!ruleCanEdit) { e.target.value = detectMode(); return; }
+    if (name === "custom") {
+      try {
+        const r = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({mode: "custom"})});
+        if (r.ok) { const j = await r.json(); ruleSettings = j.settings || ruleSettings; paintSwitches(); }
+      } catch {}
+      return;
+    }
     const msgs = {aggressive: "Aggressive trades MORE often, including the historically weaker afternoon window. This is not a path to higher win rate — it's more exposure. Switch?",
                   conservative: "Conservative trades LESS often, only in stricter conditions. Some days this may produce zero calls. Switch?"};
     if (msgs[name] && !window.confirm(msgs[name])) { e.target.value = detectMode(); return; }
     try {
       const r = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
-                                              body: JSON.stringify(MODES[name])});
+                                              body: JSON.stringify({mode: name, ...MODES[name]})});
       if (r.ok) { const j = await r.json(); ruleSettings = j.settings || ruleSettings; paintSwitches(); }
     } catch {}
   };
@@ -1191,7 +1557,7 @@ footer{margin-top:16px;font-size:12px;color:var(--muted)}
 
   function render() {
     if (!state) return;
-    renderHeader(); renderTiles(); try { renderReal(); } catch (e) { console.error(e); } renderChart(); renderTrade(); renderBrain(); renderSignals(); renderLadder(); renderSmile(); renderFlow(); renderTape(); checkAlerts();
+    renderHeader(); renderTiles(); try { renderReal(); } catch (e) { console.error(e); } renderChart(); renderTrade(); renderBrain(); renderSignals(); renderModeComparison(); renderLadder(); renderSmile(); renderFlow(); renderTape(); checkAlerts();
     const f = state.feed || {};
     $("foot").textContent = `${f.note ? f.note + " · " : ""}Updated ${state.generated_at ? new Date(state.generated_at).toLocaleTimeString("en-IN") : "—"} · Personal research tool. Not investment advice. Signals (when any) are probabilities, never certainties.`;
   }

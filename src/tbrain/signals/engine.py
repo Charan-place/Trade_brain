@@ -46,6 +46,7 @@ class EngineConfig:
     square_off: dtime = dtime(15, 20)
     expiry_cutoff: dtime = dtime(13, 30)
     max_feed_age_s: float = 3.0
+    max_quote_age_s: float = 3.0
     warmup_bars: int = 15
     horizon_min: int = 15
     big_window_s: int = 300
@@ -92,6 +93,7 @@ class EngineConfig:
     # ---- shadows ----
     shadows: bool = True
     range_fade_shadow: bool = True
+    mode_id: str = "balanced"
 
 
 def _fmt(x: float | None, d: int = 2) -> str:
@@ -474,6 +476,10 @@ class SignalEngine:
         if not leg:
             return None, "ATM leg missing"
         q = (ctx.get("quotes") or {}).get(leg["key"], {})
+        quote_recv_ns = q.get("recv_ns")
+        quote_age_s = (now_ms - quote_recv_ns / 1e6) / 1000 if quote_recv_ns else None
+        if quote_recv_ns is not None and (quote_age_s < 0 or quote_age_s > cfg.max_quote_age_s):
+            return None, f"option quote stale or unavailable (> {cfg.max_quote_age_s:.0f}s)"
         bid, ask = q.get("bp1"), q.get("ap1")
         if not bid or not ask or ask < bid:
             return None, "no two-sided quote on the ATM leg"
@@ -521,7 +527,8 @@ class SignalEngine:
         if enforce and cfg.correlation_block and correlated:
             return None, f"same-direction call already open on {correlated[0]} (correlation block)"
         return {
-            "id": uuid.uuid4().hex[:10], "und": und, "dir": d, "direction": "bullish" if d > 0 else "bearish",
+            "id": f"{cfg.mode_id}-{uuid.uuid4().hex[:10]}", "mode": cfg.mode_id, "mode_version": 1,
+            "und": und, "dir": d, "direction": "bullish" if d > 0 else "bearish",
             "action": f"BUY {kind}", "instrument_key": leg["key"], "kind": kind, "strike": K, "expiry": ch.get("expiry"),
             "symbol": f"{und} {K:.0f} {kind} {ch.get('expiry')}", "lot": lot, "issued_ms": now_ms,
             "issued_at": now.isoformat(), "score": side["score"], "max_score": side["max"], "trigger": side["trigger"],
@@ -595,8 +602,11 @@ class SignalEngine:
     # ------------------------------------------------------------ tracking
     def _track(self, c: dict, ctx: dict | None, now_ms: float, tr=None) -> None:
         q = ((ctx or {}).get("quotes") or {}).get(c["instrument_key"], {})
+        recv_ns = q.get("recv_ns")
+        quote_age_s = (now_ms - recv_ns / 1e6) / 1000 if recv_ns else None
+        quote_fresh = recv_ns is None or 0 <= quote_age_s <= self.cfg.max_quote_age_s
         u = (ctx or {}).get("spot")
-        bid = q.get("bp1") or q.get("ltp")
+        bid = (q.get("bp1") or q.get("ltp")) if quote_fresh else None
         if bid:
             c["last_bid"] = bid
             cost = c["cost_override"] if c.get("cost_override") is not None else real_cost_per_lot(c["entry"], bid, c["lot"])
@@ -609,14 +619,17 @@ class SignalEngine:
         c["u_last"] = u
         d = c["dir"]
         psl = c.get("p_sl_active", c.get("p_sl"))
-        ltp = q.get("ltp") or bid
-        if self.cfg.premium_stop and psl and bid and bid <= psl and ltp and ltp <= psl:
+        ltp = (q.get("ltp") or bid) if quote_fresh else None
+        if c["t1_hit"] and bid and ltp and bid <= c["entry"] and ltp <= c["entry"]:
+            c["stop_via"] = "premium_breakeven"
+            return self._close(c, "T1_STOP", now_ms)
+        if self.cfg.premium_stop and not c["t1_hit"] and psl and bid and bid <= psl and ltp and ltp <= psl:
             c["stop_via"] = "premium"
             return self._close(c, "BREAKEVEN" if c["t1_hit"] else "SL", now_ms)
         if u is not None:
             if (d > 0 and u <= c["u_sl_active"]) or (d < 0 and u >= c["u_sl_active"]):
                 c["stop_via"] = "index"
-                return self._close(c, "BREAKEVEN" if c["t1_hit"] else "SL", now_ms)
+                return self._close(c, "T1_STOP" if c["t1_hit"] else "SL", now_ms)
             cfg = self.cfg
             held_long_enough = now_ms - c["issued_ms"] >= cfg.direction_check_min_hold_s * 1000
             up_enough = c["risk_per_lot"] > 0 and c["r_now"] >= cfg.direction_check_min_r
@@ -658,7 +671,7 @@ class SignalEngine:
         return {"calls": len(self.calls), "closed": n, "hit_t1": sum(c["t1_hit"] for c in closed) / n,
                 "avg_r": sum(c["r_now"] for c in closed) / n, "total_pnl_per_lot": sum(c["pnl_per_lot"] for c in closed),
                 "by_outcome": {o: sum(1 for c in closed if c["outcome"] == o)
-                               for o in ("T2", "BREAKEVEN", "SL", "TIME", "EARLY_EXIT")}}
+                               for o in ("T2", "T1_STOP", "BREAKEVEN", "SL", "TIME", "EARLY_EXIT")}}
 
     def realized_path(self, now_ms: float) -> tuple[float, float]:
         """(peak, current) cumulative R of today's REAL calls that had closed by now_ms, in exit order."""

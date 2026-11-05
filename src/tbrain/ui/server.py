@@ -144,7 +144,7 @@ def real_action(store, path: str, body: dict, max_cap: float) -> tuple[int, dict
     return 404, {"error": "not found"}
 
 
-def make_handler(bc: Broadcaster, settings_store=None, history=None, max_cap: float = 10000.0):
+def make_handler(bc: Broadcaster, settings_store=None, history=None, max_cap: float = 10000.0, mode_history=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -201,6 +201,20 @@ def make_handler(bc: Broadcaster, settings_store=None, history=None, max_cap: fl
                     self._send(200, body, "application/json")
                 except Exception as e:  # noqa: BLE001
                     self._send(503, json.dumps({"error": repr(e)}).encode(), "application/json")
+            elif path == "/api/mode-history":
+                from urllib.parse import parse_qs, urlparse
+                qs = parse_qs(urlparse(self.path).query)
+                mode = (qs.get("mode") or ["balanced"])[0]
+                day = (qs.get("day") or [None])[0]
+                try:
+                    from tbrain.history import MODE_NAMES
+                    days = max(1, min(int((qs.get("days") or [365])[0]), 365))
+                    if mode not in MODE_NAMES:
+                        raise ValueError("unknown mode")
+                    result = mode_history(mode, days, day) if mode_history else {"mode": mode, "days": []}
+                    self._send(200, json.dumps(result, default=str).encode(), "application/json")
+                except Exception as e:  # noqa: BLE001
+                    self._send(503, json.dumps({"error": repr(e)}).encode(), "application/json")
             elif path == "/api/real":
                 from tbrain.config import Settings
                 body = json.dumps({"real": settings_store.get_real() if settings_store else {},
@@ -254,9 +268,10 @@ class _QuietServer(ThreadingHTTPServer):
 
 
 class UIServer:
-    def __init__(self, bc: Broadcaster, port: int = 8765, settings_store=None, history=None, max_cap: float = 10000.0):
+    def __init__(self, bc: Broadcaster, port: int = 8765, settings_store=None, history=None,
+                 max_cap: float = 10000.0, mode_history=None):
         self.bc, self.port = bc, port
-        self.srv = _QuietServer(("127.0.0.1", port), make_handler(bc, settings_store, history, max_cap))
+        self.srv = _QuietServer(("127.0.0.1", port), make_handler(bc, settings_store, history, max_cap, mode_history))
         self.srv.daemon_threads = True
         self.url = f"http://127.0.0.1:{port}/"
         self._t: threading.Thread | None = None
@@ -279,10 +294,11 @@ def serve(s: Settings, port: int = 8765, force_demo: bool = False, open_browser:
     provider = provider or (lambda: current_state(s, force_demo))
     try:
         from tbrain.runtime_settings import FileSettings
-        from tbrain.history import from_exec_files, from_files
+        from tbrain.history import from_exec_files, from_files, from_mode_files
         ui = UIServer(bc, port, FileSettings(s.data_dir / "live" / "settings.json"),
                       history=lambda book="signal": from_files(s.data_dir) if book == "signal" else from_exec_files(s.data_dir, book),
-                      max_cap=s.real_loss_cap_max).start()
+                      max_cap=s.real_loss_cap_max,
+                      mode_history=lambda mode="balanced", days=365, day=None: from_mode_files(s.data_dir, mode, days, day)).start()
     except OSError as e:
         print(f"Port {port} busy ({e}). If `tbrain record` is running, its UI is already at http://127.0.0.1:{port}/")
         return

@@ -19,10 +19,15 @@ from pathlib import Path
 
 ALLOWED = ("allow_afternoon", "dd_stop", "t1_direction_check", "vol_regime_filter", "regime_gate",
            "event_calendar_gate")
+MODES = ("conservative", "balanced", "aggressive", "custom")
 
 
 def clean(d: dict | None) -> dict:
-    return {k: v for k, v in (d or {}).items() if k in ALLOWED and isinstance(v, bool)}
+    out = {k: v for k, v in (d or {}).items() if k in ALLOWED and isinstance(v, bool)}
+    mode = (d or {}).get("mode")
+    if mode in MODES:
+        out["mode"] = mode
+    return out
 
 
 class _Store:
@@ -40,7 +45,10 @@ class _Store:
 
     def update(self, changes: dict) -> dict:
         doc = self._load()
-        doc.update(clean(changes))
+        update = clean(changes)
+        if any(k in changes for k in ALLOWED) and "mode" not in update:
+            update["mode"] = "custom"
+        doc.update(update)
         self._save(doc)
         return clean(doc)
 

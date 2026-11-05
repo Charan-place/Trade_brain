@@ -94,9 +94,9 @@ def test_rules_block_reports_switch_state():
 def test_settings_stores_whitelist_and_persist(tmp_path, store_factory):
     st = store_factory(tmp_path)
     assert st.get() == {}
-    assert st.update({"allow_afternoon": True, "min_score": 1, "dd_stop": "no"}) == {"allow_afternoon": True}
-    assert st.update({"dd_stop": False}) == {"allow_afternoon": True, "dd_stop": False}
-    assert st.get() == {"allow_afternoon": True, "dd_stop": False}
+    assert st.update({"allow_afternoon": True, "min_score": 1, "dd_stop": "no"}) == {"allow_afternoon": True, "mode": "custom"}
+    assert st.update({"dd_stop": False}) == {"allow_afternoon": True, "dd_stop": False, "mode": "custom"}
+    assert st.get() == {"allow_afternoon": True, "dd_stop": False, "mode": "custom"}
 
 
 def test_backtest_presets_keep_old_behaviour_reproducible():

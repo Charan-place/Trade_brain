@@ -25,10 +25,11 @@ CONFIRM_PHRASE = "yes use my real money"
 
 class ExecutionHub:
     def __init__(self, s, store, log=print, real_broker=None, store_dir: Path | None = None, now_fn=None,
-                 on_event=None, control_poll_s: float = 2.0):
+                 on_event=None, control_poll_s: float = 2.0, real_enabled: bool = True):
         self.s, self.store, self.log = s, store, log
         self.now_fn = now_fn or (lambda: time.time() * 1000)
         self._emit = on_event
+        self.real_enabled = real_enabled
         base = dict(lots=s.real_lots, max_open=s.real_max_open, max_orders=s.real_max_orders,
                     cost_per_lot_inr=s.cost_per_lot_inr, safety_stop_r=s.real_safety_stop_r,
                     entry_timeout_s=s.real_entry_timeout_s)
@@ -47,6 +48,7 @@ class ExecutionHub:
         self._mismatch = 0
         self._last_reconcile = -1e18
         self._skips: dict[str, dict] = {}     # call_id -> real skip record when there is no real book at all
+        self._selected_mode = self._get_selected_mode()
         self._day = None
         self._rday = None
         self._lock = threading.RLock()
@@ -75,6 +77,9 @@ class ExecutionHub:
         try:
             r = self.store.get_real()
             want = bool(r.get("on"))
+            if want and not self.real_enabled:
+                self.real_on, self.why_off = False, "real execution disabled in test run"
+                return
             if want and not self.real_on:
                 if self.real is None:
                     self._set_off("broker not connected")
@@ -103,7 +108,30 @@ class ExecutionHub:
             self.real.exit_all("manual exit all")
             self.log("[real] manual exit-all requested")
         elif c["kind"] == "approve" and c.get("call_id"):
+            t = self.real.trades.get(f"real:{c['call_id']}")
+            if t and t.get("mode", "balanced") != self._get_selected_mode():
+                self.real.exit(t["id"], "mode changed before approval")
+                return
             self.real.approve(c["call_id"])
+
+    def _get_selected_mode(self) -> str:
+        try:
+            mode = (self.store.get() or {}).get("mode", "balanced") if self.store else "balanced"
+            return mode if mode in ("conservative", "balanced", "aggressive", "custom") else "balanced"
+        except Exception:  # noqa: BLE001
+            return "balanced"
+
+    def mode_changed(self, mode: str) -> None:
+        """Cancel old-mode entries that have not filled; filled positions keep their existing exit path."""
+        if mode == self._selected_mode:
+            return
+        previous = self._selected_mode
+        self._selected_mode = mode
+        if self.real:
+            for t in list(self.real.open_trades()):
+                if t.get("mode", "balanced") == previous and t["state"] in ("approval", "entry"):
+                    self.real.exit(t["id"], f"mode changed to {mode} before fill")
+        self.log(f"[mode] selected mode changed {previous} -> {mode}; existing filled trades remain managed")
 
     def _set_off(self, why: str) -> None:
         self.real_on, self.why_off = False, why
@@ -133,34 +161,42 @@ class ExecutionHub:
         self.tick(now_ms)
 
     def on_event(self, event: str, call: dict) -> None:
+        self.on_mode_event(event, call, selected=True)
+
+    def on_mode_event(self, event: str, call: dict, selected: bool) -> None:
         if call.get("shadow"):
             return
+        paper_exists = f"paper:{call['id']}" in self.paper.trades
         try:
-            if event == "issue":
+            if event == "issue" and selected:
                 self.paper.on_issue(call, gate=self._paper_gate)
-            elif event == "t1":
+            elif event == "t1" and paper_exists:
                 self.paper.on_t1(call)
-            elif event == "close":
+            elif event == "close" and paper_exists:
                 self.paper.on_close(call)
         except Exception as e:  # noqa: BLE001
             self.log(f"[exec] paper {event} failed: {e!r}")
+        real_exists = bool(self.real and f"real:{call['id']}" in self.real.trades)
         if self.real is None:
-            if event == "issue":
+            if event == "issue" and selected:
                 self._skips[call["id"]] = {"state": "skipped", "reason": "broker not connected"}
             return
         if self._async:
-            self._q.put((event, dict(call)))
+            self._q.put((event, dict(call), selected))
         else:
-            self._real_event(event, call)
+            if (event == "issue" and selected) or (event != "issue" and real_exists):
+                self._real_event(event, call)
 
-    def _real_event(self, event: str, call: dict) -> None:
+    def _real_event(self, event: str, call: dict, selected: bool = True) -> None:
         with self._lock:
             try:
-                if event == "issue":
+                tid = f"real:{call['id']}"
+                exists = tid in self.real.trades
+                if event == "issue" and selected and call.get("mode", "balanced") == self._get_selected_mode():
                     self.real.on_issue(call, gate=self._real_gate)
-                elif event == "t1":
+                elif event == "t1" and exists:
                     self.real.on_t1(call)
-                elif event == "close":
+                elif event == "close" and exists:
                     self.real.on_close(call)
             except Exception as e:  # noqa: BLE001
                 self.log(f"[real] {event} failed: {e!r}")
@@ -170,8 +206,8 @@ class ExecutionHub:
         last = 0.0
         while not self._stop.is_set():
             try:
-                ev, call = self._q.get(timeout=0.25)
-                self._real_event(ev, call)
+                ev, call, selected = self._q.get(timeout=0.25)
+                self._real_event(ev, call, selected)
             except queue.Empty:
                 pass
             if time.monotonic() - last >= 1.0:

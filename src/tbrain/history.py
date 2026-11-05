@@ -79,6 +79,68 @@ def from_mongo(db, owner: str | None, days: int = 60) -> dict:
     return summarize(calls, days)
 
 
+MODE_NAMES = ("conservative", "balanced", "aggressive", "custom")
+
+
+def _mode_history(calls: list[dict], mode: str, days: int = 365, records: dict | None = None,
+                  include_calls: bool = True) -> dict:
+    from tbrain.signals.engine import SignalEngine
+    from tbrain.signals.modes import MODE_RULES
+
+    by_day: dict[str, list[dict]] = {}
+    for call in calls:
+        if call.get("mode") != mode:
+            continue
+        day = _day(call.get("issued_ms"))
+        if day:
+            by_day.setdefault(day, []).append(call)
+    days_out = []
+    for day in sorted((records or {}).keys() | by_day.keys(), reverse=True)[:days]:
+        doc = (records or {}).get(day) or {}
+        rows = sorted(by_day.get(day, doc.get("calls") or []), key=lambda c: c.get("issued_ms") or 0, reverse=True)
+        rules = doc.get("rules") or MODE_RULES.get(mode, {})
+        days_out.append({"day": day, "mode": mode, "summary": doc.get("summary") or SignalEngine.summarize(rows),
+                         "calls": [compact(c) for c in rows] if include_calls else [], "rules": rules,
+                         "return_basis": doc.get("return_basis") or
+                           "signal model: entry at ask, exits marked at bid, estimated costs",
+                         "selected": doc.get("selected")})
+    return {"mode": mode, "days": days_out}
+
+
+def from_mode_files(data_dir: Path, mode: str, days: int = 365, day: str | None = None) -> dict:
+    """Local fallback: profile engines persist their latest call state in per-mode JSONL logs."""
+    if mode not in MODE_NAMES:
+        raise ValueError("unknown mode")
+    root = Path(data_dir) / "signals"
+    folder = root if mode == "balanced" else root / "modes" / mode
+    p = folder / "calls.jsonl"
+    latest: dict[str, dict] = {}
+    if p.exists():
+        for line in p.read_text().splitlines():
+            try:
+                call = json.loads(line)["call"]
+                latest[call["id"]] = call
+            except (json.JSONDecodeError, KeyError):
+                continue
+    rows = [c for c in latest.values() if not day or _day(c.get("issued_ms")) == day]
+    return _mode_history(rows, mode, max(1, min(int(days), 365)), include_calls=bool(day))
+
+
+def from_mongo_modes(db, owner: str | None, mode: str, days: int = 365, day: str | None = None) -> dict:
+    """Read the archived per-day modeled performance for one strategy profile."""
+    if mode not in MODE_NAMES:
+        raise ValueError("unknown mode")
+    days = max(1, min(int(days), 365))
+    q = {"mode": mode, **({"owner": owner} if owner else {})}
+    proj = {"_id": 0, "day": 1, "mode": 1, "summary": 1, "rules": 1, "return_basis": 1, "selected": 1}
+    if day:
+        q["day"] = day
+        proj["calls"] = 1
+    docs = list(db.mode_daily.find(q, proj).sort("day", -1).limit(1 if day else days))
+    records = {d["day"]: d for d in docs if d.get("day")}
+    return _mode_history([c for d in docs for c in d.get("calls", [])], mode, days, records, include_calls=bool(day))
+
+
 # ---------------------------------------------------------------- paper / real books (owner only)
 def exec_compact(t: dict) -> dict | None:
     """A paper/real trade in the same shape as a call, so the dashboard table can show it."""

@@ -215,14 +215,14 @@ def test_same_call_twice_creates_one_trade_and_one_order():
     assert o1.id == bk.trades["paper:c1"]["entry_order"]                            # same ref -> same order
 
 
-def test_t1_raises_stop_to_minus_one_r():
+def test_t1_raises_stop_to_breakeven():
     clock = Clock(ms(10, 0)); b = PaperBroker(clock)
     bk = TradeBook("paper", b, BookConfig(), log=lambda *a: None, now_fn=clock)
     b.on_quotes({INS: q(100.0, 100.4)}); t = bk.on_issue(call())
     before = b.get(t["stop_order"]).trigger
     bk.on_t1({"id": "c1"})
     after = b.get(t["stop_order"]).trigger
-    assert after > before and after == tick_down(90.0)
+    assert after > before and after == tick_down(t["entry_price"])
 
 
 def test_limits_max_open_and_max_orders():
@@ -244,6 +244,33 @@ def test_real_is_skipped_when_off_and_paper_still_trades():
     snap = h.snapshot()
     assert snap["paper"]["trades"]["c1"]["state"] == "open"
     assert snap["real"]["trades"]["c1"]["state"] == "skipped" and snap["real"]["trades"]["c1"]["reason"] == "real money is off"
+
+
+def test_only_selected_mode_can_create_real_orders():
+    h, store, rb, clock = hub_with()
+    turn_on(h, store)
+    feed(h, clock, {INS: q(100.0, 100.4)}, rb)
+    unselected = call("other") | {"mode": "aggressive"}
+    h.on_mode_event("issue", unselected, selected=False)
+    assert "real:other" not in h.real.trades and "paper:other" not in h.paper.trades
+    store.update({"mode": "aggressive"})
+    h.mode_changed("aggressive")
+    selected = call("chosen") | {"mode": "aggressive"}
+    h.on_mode_event("issue", selected, selected=True)
+    assert h.real.trades["real:chosen"]["state"] == "open"
+    assert h.paper.trades["paper:chosen"]["state"] == "open"
+
+
+def test_mode_change_cancels_unapproved_real_entry():
+    h, store, rb, clock = hub_with(real_confirm_each=True)
+    turn_on(h, store)
+    feed(h, clock, {INS: q(100.0, 100.4)}, rb)
+    c = call() | {"mode": "balanced"}
+    h.on_mode_event("issue", c, selected=True)
+    assert h.real.trades["real:c1"]["state"] == "approval"
+    store.update({"mode": "aggressive"})
+    h.mode_changed("aggressive")
+    assert h.real.trades["real:c1"]["state"] == "skipped"
 
 
 def test_no_broker_at_all_is_reported_and_switch_cannot_stay_on():

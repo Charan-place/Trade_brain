@@ -66,6 +66,7 @@ class Recorder:
         self.settings_store = settings_store  # dashboard switches (afternoon calls, drawdown stop)
         self._last_settings = 0.0
         self._last_daily = 0.0
+        self._last_mode_daily = 0.0
         self.note = ""
         self.feed = LiveFeed(token_provider, self._on_msg, self._on_state, tls_verify=s.tls_verify, stale_s=s.stale_s)
 
@@ -180,37 +181,50 @@ class Recorder:
             raise RuntimeError("No underlyings resolved from the instrument file.")
         engine = None
         if self.write:  # live recording only: probes / replays never issue calls
-            from tbrain.signals.engine import EngineConfig, SignalEngine
-            engine = SignalEngine(EngineConfig(min_score=self.s.signal_min_score, cost_per_lot_inr=self.s.cost_per_lot_inr,
+            from tbrain.signals.engine import EngineConfig
+            from tbrain.signals.modes import ModeManager
+            base_cfg = EngineConfig(min_score=self.s.signal_min_score, cost_per_lot_inr=self.s.cost_per_lot_inr,
                                                risk_per_trade_inr=self.s.risk_per_trade_inr, require_vwap=self.s.require_vwap,
                                                trend_k=self.s.trend_k, loss_pause_n=self.s.loss_pause_n,
                                                regime_gate=self.s.regime_gate, premium_stop=self.s.premium_stop,
                                                fut_oi_fresh=self.s.fut_oi_fresh,
                                                afternoon_cutoff=self.s.cutoff_time(), allow_afternoon=self.s.allow_afternoon,
                                                dd_stop=self.s.dd_stop, dd_peak_r=self.s.dd_peak_r,
-                                               dd_giveback_r=self.s.dd_giveback_r),
-                                  store_dir=self.s.data_dir / "signals", log=self.log)
+                                               dd_giveback_r=self.s.dd_giveback_r)
+            engine = ModeManager(base_cfg, self.settings_store, self.s.data_dir / "signals", log=self.log)
             self.engine = engine
             self._apply_settings(force=True)
             from tbrain.storage.mongo import open_sink
             self.sink = open_sink(self.s, log=self.log)
+            if self.sink:
+                archived = engine.archive_history()
+                for day, comparison in archived:
+                    self.sink.on_mode_comparison(day, comparison)
+                if archived:
+                    self.log(f"[mongo] queued mode-history backfill for {len(archived)} session day(s)")
             from tbrain.execution.hub import ExecutionHub
-            if self.real_broker is None:
+            real_enabled = respect_hours and duration_s is None
+            if real_enabled and self.real_broker is None:
                 try:
                     self.real_broker = self.s.order_broker()
                 except Exception as e:  # noqa: BLE001 - real money is optional; paper and signals go on
                     self.log(f"[real] order server not usable: {e!r}")
-            self.hub = ExecutionHub(self.s, self.settings_store, log=self.log, real_broker=self.real_broker,
+            if not real_enabled:
+                self.log("[real] disabled for bounded / --now recorder run; signals and paper tracking remain available")
+            self.hub = ExecutionHub(self.s, self.settings_store, log=self.log,
+                                    real_broker=self.real_broker if real_enabled else None, real_enabled=real_enabled,
                                     store_dir=self.s.data_dir / "exec",
                                     on_event=(self.sink.on_exec_event if self.sink else None))
             sink, hub = self.sink, self.hub
 
-            def on_event(event, call):
-                if sink:
-                    sink.on_call_event(event, call)
-                hub.on_event(event, call)
-            engine.on_event = on_event
-            engine.on_step = hub.on_step
+            engine.hub = hub
+            for mode_engine in engine.engines.values():
+                previous_event = mode_engine.on_event
+                def on_event(event, call, previous_event=previous_event):
+                    if sink:
+                        sink.on_call_event(event, call)
+                    previous_event(event, call)
+                mode_engine.on_event = on_event
         self.brain = BrainState(contracts, self.index_keys, self.s.vix_key, self.s.risk_free,
                                 count_recorded_sessions(self.s.data_dir), engine=engine)
         try:  # restart-safe: rebuild today's candles + VWAP from what was already recorded
@@ -219,7 +233,7 @@ class Recorder:
                     for u in self.index_keys if ins.nearest_future(contracts, u, today)}
             keys = set(self.index_keys.values()) | set(futs.values())
             if engine:
-                keys |= {c["instrument_key"] for c in engine.today_calls()}
+                keys |= {c["instrument_key"] for e in engine.engines.values() for c in e.today_calls()}
             backfill_today(self.brain, self.s.data_dir / "ticks", today.isoformat(), keys, futs, log=self.log)
         except Exception as e:
             self.log(f"[backfill] skipped: {e!r}")
@@ -305,10 +319,12 @@ class Recorder:
                 writer.join(timeout=30)
             if self.chain is not None:
                 self.chain.flush()
-            self.write_live_state()
+            final_snap = self.brain.snapshot(self.feed_info(), mode="live") if self.brain is not None else None
+            self.write_live_state(final_snap)
         m = self._manifest(started, contracts)
         if self.sink:
-            self._save_daily(force=True)
+            self._save_daily(force=True, snap=final_snap)
+            self._save_mode_daily(force=True, snap=final_snap)
             self.sink.on_session(m)
             self.sink.close()
             self.log(f"[mongo] {self.sink.stats()}")
@@ -333,11 +349,12 @@ class Recorder:
             from tbrain.ui.server import Broadcaster, UIServer
             self.bc = Broadcaster()
             try:
-                from tbrain.history import from_exec_files, from_files
+                from tbrain.history import from_exec_files, from_files, from_mode_files
                 dd = self.s.data_dir
                 self.ui = UIServer(self.bc, self.ui_port, self.settings_store,
                                    history=lambda book="signal": from_files(dd) if book == "signal" else from_exec_files(dd, book),
-                                   max_cap=self.s.real_loss_cap_max).start()
+                                   max_cap=self.s.real_loss_cap_max,
+                                   mode_history=lambda mode="balanced", days=365, day=None: from_mode_files(dd, mode, days, day)).start()
             except OSError as e:
                 self.log(f"[ui] port {self.ui_port} busy ({e}); recording continues without the UI")
                 self.bc = None
@@ -373,6 +390,20 @@ class Recorder:
         except Exception as e:  # noqa: BLE001
             self.log(f"[mongo] daily summary skipped: {e!r}")
 
+    def _save_mode_daily(self, force: bool = False, snap: dict | None = None) -> None:
+        if not self.sink or self.brain is None or (not force and time.monotonic() - self._last_mode_daily < 60):
+            return
+        self._last_mode_daily = time.monotonic()
+        try:
+            snap = snap or self.brain.snapshot(self.feed_info(), mode="live")
+            comparison = ((snap.get("signals") or {}).get("mode_comparison") or {})
+            if comparison.get("modes"):
+                from tbrain.storage.mongo import day_of_ms
+                day = day_of_ms(snap.get("generated_ms")) or ist_date().isoformat()
+                self.sink.on_mode_comparison(day, comparison)
+        except Exception as e:  # noqa: BLE001
+            self.log(f"[mongo] mode-history snapshot skipped: {e!r}")
+
     def _brain_loop(self) -> None:
         last_file = 0.0
         nxt = time.monotonic()
@@ -392,6 +423,7 @@ class Recorder:
                 if self.sink:
                     self.sink.on_snapshot(snap)
                     self._save_daily(snap=snap)
+                    self._save_mode_daily(snap=snap)
                 if time.monotonic() - last_file >= STATE_FILE_EVERY_S:
                     last_file = time.monotonic()
                     self.write_live_state(snap)

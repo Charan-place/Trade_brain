@@ -88,7 +88,8 @@ class TradeBook:
         if tid in self.trades:
             return self.trades[tid]
         lots = max(1, int(self.cfg.lots))
-        t = {"id": tid, "book": self.name, "call_id": call["id"], "und": call.get("und"), "symbol": call.get("symbol"),
+        t = {"id": tid, "book": self.name, "call_id": call["id"], "mode": call.get("mode", "balanced"),
+             "und": call.get("und"), "symbol": call.get("symbol"),
              "instrument": call["instrument_key"], "lot_size": int(call.get("lot") or 1), "lots": lots,
              "qty": lots * int(call.get("lot") or 1), "zone": call.get("entry_zone"), "signal_entry": call.get("entry"),
              "p_sl": call.get("p_sl"), "dir": call.get("dir"), "state": "skipped", "reason": None, "filled_qty": 0, "exit_qty": 0,
@@ -126,7 +127,9 @@ class TradeBook:
         t = self.trades.get(f"{self.name}:{call['id']}")
         if not t or t["state"] != "open" or not t.get("stop_order") or not t.get("entry_price"):
             return
-        new = tick_down(t["entry_price"] - (t["entry_price"] - (t["p_sl"] or t["entry_price"] * 0.9)))  # -1R
+        # Once T1 is reached, protect the filled position at its actual average fill price.
+        # The call's modelled p_sl is below entry and would leave the broker stop at a loss.
+        new = tick_down(t["entry_price"])
         try:
             o = self.broker.get(t["stop_order"])
             if o.status == OPEN and (o.trigger or 0) < new:

@@ -10,6 +10,7 @@ Design rules
     features   one doc per underlying per minute: price, VWAP, ATR, regime, flow, chain, clues  (_id = day|und|HH:MM)
     sessions   recorder run manifests                                                           (_id = started)
     daily      per-day summary + filter scorecard                                               (_id = day|owner)
+    mode_daily per-day modeled calls + returns for each strategy profile                        (_id = day|owner|mode)
     users      Google accounts allowed into the hosted app                                     (_id = email)
     upstox_tokens  per-user Upstox access token, encrypted (Fernet)                            (_id = email)
 """
@@ -23,7 +24,7 @@ from datetime import datetime, timezone
 
 from tbrain.timeutil import IST
 
-COLLECTIONS = ("calls", "shadows", "features", "sessions", "daily", "users", "upstox_tokens", "exec_trades")
+COLLECTIONS = ("calls", "shadows", "features", "sessions", "daily", "mode_daily", "users", "upstox_tokens", "exec_trades")
 
 
 def clean(x):
@@ -98,6 +99,7 @@ def ensure_indexes(db) -> None:
     db.features.create_index([("day", ASCENDING), ("und", ASCENDING), ("t_ms", ASCENDING)])
     db.sessions.create_index([("day", ASCENDING)])
     db.daily.create_index([("day", DESCENDING)])
+    db.mode_daily.create_index([("owner", ASCENDING), ("mode", ASCENDING), ("day", DESCENDING)])
 
 
 def ping(db) -> bool:
@@ -159,6 +161,26 @@ def minute_feature_docs(snap: dict, owner: str) -> list[dict]:
 def daily_doc(day: str, owner: str, summary: dict, shadow_by_blocker: dict, rules: dict | None) -> dict:
     return clean({"_id": f"{day}|{owner}", "day": day, "owner": owner, "summary": summary,
                   "shadow_by_blocker": shadow_by_blocker, "rules": rules or {},
+                  "updated_at": datetime.now(timezone.utc)})
+
+
+MODE_CALL_FIELDS = ("id", "mode", "mode_version", "und", "symbol", "action", "direction", "dir", "issued_ms", "exit_ms",
+                    "entry", "exit", "last_bid", "p_sl", "p_sl_active", "p_t1", "p_t2", "outcome", "status", "r_now",
+                    "pnl_per_lot", "cost_est_per_lot", "score", "max_score", "lot", "expiry", "strike", "kind", "t1_hit",
+                    "rr_net", "risk_per_lot", "size_hint_lots")
+
+
+def mode_daily_doc(day: str, owner: str, mode: str, profile: dict, selected_mode: str | None) -> dict:
+    """Compact daily snapshot of one model profile. Values are signal-model marks, never broker fills."""
+    calls = [{k: c.get(k) for k in MODE_CALL_FIELDS} for c in profile.get("calls") or []
+             if day_of_ms(c.get("issued_ms")) == day]
+    from tbrain.signals.engine import SignalEngine
+    summary = SignalEngine.summarize(calls)
+    return clean({"_id": f"{day}|{owner}|{mode}", "day": day, "owner": owner, "mode": mode,
+                  "selected": (mode == selected_mode) if selected_mode else None,
+                  "summary": summary, "calls": calls, "rules": profile.get("rules") or {},
+                  "return_basis": profile.get("return_basis") or
+                    "signal model: entry at ask, exits marked at bid, estimated costs",
                   "updated_at": datetime.now(timezone.utc)})
 
 
@@ -226,6 +248,16 @@ class MongoSink:
             d = daily_doc(day, self.owner, summary, shadow_by_blocker, rules)
             self._put("daily", d["_id"], d)
         except Exception as e:  # noqa: BLE001
+            self._err(e)
+
+    def on_mode_comparison(self, day: str, comparison: dict) -> None:
+        """Upsert one owner/day/profile snapshot for historical modeled-return lookups."""
+        try:
+            selected = comparison.get("selected")
+            for mode, profile in (comparison.get("modes") or {}).items():
+                d = mode_daily_doc(day, self.owner, mode, profile, selected)
+                self._put("mode_daily", d["_id"], d)
+        except Exception as e:  # noqa: BLE001 - mode archives must never stop recording
             self._err(e)
 
     def on_session(self, manifest: dict) -> None:

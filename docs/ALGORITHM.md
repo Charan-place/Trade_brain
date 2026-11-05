@@ -26,6 +26,7 @@ For **UP** (the **DOWN** side asks the mirror questions):
 | 7 | Volatility | Option "air" not leaking? | ATM straddle change over 5 min ≥ 0 |
 
 Needs **≥ 5 of 7** (`TBRAIN_SIGNAL_MIN_SCORE`).
+This is a raw rule count, **not a probability or seven independent confirmations**. Several clues can reflect the same price move (for example VWAP, aggression and futures OI); a high score must not be read as calibrated confidence. The score remains experimental until it is measured against a larger out-of-sample record.
 
 ## 3. The "go" moment (trigger)
 A completed 1-minute candle **closes above the highest high of the previous 10 candles** (below the lowest low for DOWN).
@@ -56,7 +57,7 @@ A completed 1-minute candle **closes above the highest high of the previous 10 c
   - **Slow** (every `direction_check_interval_min`, 5 min): still on our side of VWAP, still trending ≥ `trend_k` ×
     ATR, AND at least 1 of the last 2 completed candles still with us - catches a sustained reversal the fast
     layer's short window can miss.
-- Index reaches **T1** → stop moves to **breakeven** (entry level).
+- Index reaches **T1** → the real broker stop moves to the actual average fill price. Signal tracking also enforces an option-premium stop at entry after T1; if the underlying stop is reached first while the option is below entry, the result is recorded as `T1_STOP` and its actual marked P&L is retained.
 - Then **T2**, **SL/breakeven**, or **30-min time stop** (never later than 15:20) closes the call.
 - P&L per lot = (option **bid** − entry) × lot − estimated costs. R = P&L ÷ risk per lot.
 - Every event is appended to `data/signals/calls.jsonl` → scoreboard (calls, T1 hit-rate, average R, by outcome).

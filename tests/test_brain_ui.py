@@ -62,6 +62,28 @@ def test_depth_is_replaced_not_merged(rows):
     assert br.latest[k]["bp2"] is None and br.latest[k]["bp1"] == 10.1
 
 
+def test_chain_analytics_exclude_stale_option_legs(rows):
+    cs, br = _brain(rows)
+    now = datetime(2026, 10, 20, 10, 0, tzinfo=IST)
+    now_ns = int(now.timestamp() * 1e9)
+    today = now.date()
+    exp = ins.option_expiries(cs, "NIFTY", today)[0]
+    options = [c for c in cs if c.underlying == "NIFTY" and c.expiry == exp and abs(c.strike - 25000) <= 100]
+    assert len(options) >= 2
+    batch = [_row("NSE_INDEX|Nifty 50", ltp=25000, cp=24900, recv_ns=now_ns),
+             _row("NSE_INDEX|India VIX", ltp=14, cp=13, recv_ns=now_ns)]
+    for i, c in enumerate(options):
+        batch.append(_row(c.instrument_key, ltp=100 + i, bp1=99 + i, ap1=101 + i,
+                          oi=1000, ltt_ms=now_ns // 1_000_000,
+                          recv_ns=now_ns - (60 if i == 0 else 1) * 1_000_000_000))
+    fut = ins.nearest_future(cs, "NIFTY", today)
+    batch.append(_row(fut.instrument_key, ltp=25010, atp=25005, recv_ns=now_ns))
+    br.ingest(batch)
+    snap = br.snapshot({"connected": True, "market_status": {"NSE_FO": "NORMAL_OPEN"}}, mode="live", now_ns=now_ns)
+    chain = snap["underlyings"]["NIFTY"]["chains"][exp.isoformat()]
+    assert chain["stale_legs_excluded"] == 1
+
+
 def test_demo_from_probe_file(tmp_path, rows):
     cs = ins.parse_rows(rows, UNDS)
     detail = [c.to_json() for c in cs if c.underlying == "SENSEX"][:6]

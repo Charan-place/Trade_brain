@@ -1,11 +1,12 @@
 # Trade Brain — Nifty 50 + Sensex options
 
-A personal research tool that **records** live Nifty 50 (NSE) and Sensex (BSE) option data from Upstox, **analyses**
-it (own IV/Greeks, OI, order flow, big prints), shows everything in a **live brain UI**, and issues **signal-only
-calls** (option, expiry, entry, stop loss, targets, reasons) that it then tracks and scores.
+A personal trading research tool that **records** live Nifty 50 (NSE) and Sensex (BSE) option data from Upstox,
+**analyses** it (own IV/Greeks, OI, order flow, big prints), compares three independently tracked strategy profiles in a
+**live brain UI**, and can optionally route the selected profile's entries to the owner's broker.
 
-> **It never places orders.** You decide and trade manually. The signal engine is **EXPERIMENTAL** (rule-based, no
-> track record yet). Calls are probabilities, never certainties. Not investment advice. Personal use only —
+> **Real broker execution is optional and owner-controlled.** It is off unless explicitly connected and enabled in the
+> dashboard; use the paper book and mode comparison first. The signal engine is **EXPERIMENTAL** (rule-based, not a
+> calibrated probability model). Personal use only —
 > sharing or selling calls to others requires SEBI Research Analyst registration.
 
 ---
@@ -126,6 +127,14 @@ What the two processes are:
 - **UI** = your browser tab at `http://127.0.0.1:8765` (local only). Close/reopen it anytime; recording continues.
 - When *not* recording, `uv run tbrain ui` shows the last session (mode **LAST SESSION**) or a probe replay (**DEMO**).
 
+The strategy picker runs **Conservative, Balanced, and Aggressive** independently against the same feed. The dashboard
+shows each profile's modeled calls and daily P&L (entry at ask, exits marked at bid, estimated costs); only the selected
+profile can create new real broker entries. Existing filled real positions keep their originating profile's exit rules
+when you change the selection. The comparison is a counterfactual signal model, not a claim that those simulated fills
+would have been achieved by a broker. In **Strategy Lab → Past sessions**, select a profile and date to review its
+modeled return, rule snapshot, and individual trades. The recorder saves daily profile snapshots to MongoDB and
+backfills prior mode call logs when it next starts; historical results begin where persisted profile data exists.
+
 `caffeinate -i` keeps the Mac awake while recording. Closing the lid still sleeps the Mac (unless on an external display).
 
 ---
@@ -178,7 +187,7 @@ The brain only suggests. If **you** choose to act on a call:
 | `uv run tbrain instruments [--refresh]` | Download/inspect NIFTY + SENSEX contracts (expiries, lots, index keys) |
 | `uv run tbrain probe [--seconds 30]` | Short live test; saves raw decoded samples to `data/probe/` |
 | `caffeinate -i uv run tbrain record` | Full session: waits for 09:00, records, runs the brain + engine + UI, stops 15:35 |
-| `uv run tbrain record --now --seconds 120` | Test run right now (ignores market hours) |
+| `uv run tbrain record --now --seconds 120` | Bounded test run right now (ignores market hours; real broker execution is disabled) |
 | `uv run tbrain record --no-ui` / `--no-browser` / `--ui-port 8766` | Variants |
 | `uv run tbrain ui [--demo]` | UI without recording (last session or probe replay) |
 | `uv run tbrain report [--date YYYY-MM-DD]` | Coverage + gap report for a recorded day |
@@ -210,7 +219,7 @@ The brain only suggests. If **you** choose to act on a call:
 | `TBRAIN_N_STRIKES` / `TBRAIN_N_EXPIRIES` | `10` / `2` | Chain width recorded |
 | `TBRAIN_UNDERLYINGS` | `NIFTY:NSE_FO,SENSEX:BSE_FO` | What to record |
 | `TBRAIN_RISK_FREE` | `0.065` | Discount rate for Black-76 (placeholder) |
-| `MONGODB_URI`, `MONGODB_DB` | — / `tbrain` | Optional. Saves calls, shadows, minute features, sessions to MongoDB (section 12) |
+| `MONGODB_URI`, `MONGODB_DB` | — / `tbrain` | Optional. Saves calls, shadows, minute features, sessions and per-mode daily archives to MongoDB (section 12) |
 | `TBRAIN_DATA_DIR`, `TBRAIN_SECRETS_DIR` | `data/`, `.secrets/` | Where files go (set automatically on Modal) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | Hosted app: Google sign-in (section 13) |
 | `TBRAIN_ALLOWED_EMAILS` | — | Hosted app: comma-separated Gmail addresses allowed in; `*` = any verified Google account |
@@ -308,6 +317,7 @@ model learns from:
 | `shadows` | blocked candidate | same as calls + which filter blocked it — the negative/positive examples |
 | `features` | underlying × minute | spot, VWAP, ATR, regime, order flow, big prints, chain (IV, skew, PCR, max pain, walls), clue values |
 | `daily` | day | summary + filter scorecard + rules in force |
+| `mode_daily` | day × strategy profile | modeled calls, return summary, and rule snapshot for date/profile archive |
 | `sessions` | recorder run | health/gap manifest |
 | `users`, `upstox_tokens` | Google account | hosted-app users; their Upstox token **encrypted** (Fernet) |
 
@@ -327,7 +337,9 @@ on disk remain the source of truth). Free-tier limits: 0.5 GB storage, 100 ops/s
 
 What you get: a private `https://…modal.run` address. Sign in with Google → live dashboard on phone/laptop.
 Each morning tap **Connect Upstox** (Upstox tokens expire daily) → the brain starts within a minute and runs until
-15:35 IST. A 09:00 IST weekday schedule also starts it if you connected earlier. Signal-only: it never places orders.
+15:35 IST. A 09:00 IST weekday schedule also starts it if you connected earlier. All three mode comparisons run each
+day; per-mode session results and modeled trades are archived in MongoDB. Owner-only real execution follows the
+selected mode when explicitly enabled.
 
 **Cost:** Modal's Starter plan includes $30/month of free credit; ~7 h/day on 1 CPU + 2 GB in Mumbai is estimated at
 roughly $11–17/month from Modal's published per-second prices (check the Modal dashboard for real usage; Volume

@@ -94,6 +94,34 @@ def test_tracking_t1_breakeven_then_t2_and_scoreboard(tmp_path):
     assert again.calls[c["id"]]["outcome"] == "T2"
 
 
+def test_t1_stop_uses_option_premium_and_does_not_claim_false_breakeven():
+    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    tr = _tracker(); ctx = _ctx()
+    (c,) = eng.step(NOW_MS, {"NIFTY": ctx}, tr)["calls"]
+    key = c["instrument_key"]
+    ctx1 = dict(ctx, spot=c["u_t1"] + 1)
+    ctx1["quotes"] = dict(ctx["quotes"]); ctx1["quotes"][key] = {"bp1": c["p_t1"], "ltp": c["p_t1"]}
+    eng.step(NOW_MS + 60_000, {"NIFTY": ctx1}, tr)
+    assert eng.calls[c["id"]]["status"] == "t1"
+    # The index remains above the underlying breakeven, but the option has decayed below entry.
+    ctx2 = dict(ctx1, spot=c["u_entry"] + 10)
+    ctx2["quotes"] = dict(ctx1["quotes"]); ctx2["quotes"][key] = {"bp1": c["entry"] - 1, "ltp": c["entry"] - 0.5}
+    eng.step(NOW_MS + 120_000, {"NIFTY": ctx2}, tr)
+    done = eng.calls[c["id"]]
+    assert done["outcome"] == "T1_STOP" and done["pnl_per_lot"] < 0
+
+
+def test_stale_option_quote_blocks_signal_entry():
+    ctx = _ctx()
+    atm = next(r for r in ctx["chains"]["2026-10-27"]["rows"] if r["atm"])
+    key = atm["ce"]["key"]
+    ctx["quotes"][key] = dict(ctx["quotes"][key], recv_ns=int((NOW_MS - 10_000) * 1e6))
+    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    result = eng.step(NOW_MS, {"NIFTY": ctx}, _tracker())
+    assert not result["calls"]
+    assert "quote stale" in (result["diagnostics"]["NIFTY"]["blocked"] or "")
+
+
 def test_stop_loss_path(tmp_path):
     eng = SignalEngine(EngineConfig(), store_dir=tmp_path, log=lambda *a: None)
     tr = _tracker(); ctx = _ctx()

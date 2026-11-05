@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -58,7 +59,7 @@ small{display:block;margin-top:20px;color:var(--ink2);font-size:12px;text-align:
 </style></head><body><div class="card">
 <div class="mark">TB</div>
 <h1>Trade Brain</h1>
-<p>NIFTY + SENSEX options brain. Signal-only &mdash; it never places orders.</p>
+<p>NIFTY + SENSEX options brain. Three-mode research with optional owner-controlled broker execution.</p>
 <a class="btn" href="/login">
 <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18Z"/><path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 0 1 3.68 9c0-.6.1-1.18.29-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.05l3.01-2.33Z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.51.46 3.44 1.35l2.59-2.59C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z"/></svg>
 Sign in with Google</a>__ERR__
@@ -92,9 +93,9 @@ sell or share your data with third parties.</p>
 <ul>
 <li><strong>Google account:</strong> your email, name and profile info via Google Sign-In, used only to identify
 you and check you're on the allowed list.</li>
-<li><strong>Upstox access token:</strong> if you connect a broker account, your Upstox access token is stored
-encrypted and used only to read market data (quotes, option chains). The app never places, modifies or
-cancels orders.</li>
+<li><strong>Upstox access token:</strong> if connected, the encrypted token is used to read market data (quotes,
+option chains). If the owner separately enables real execution, orders are sent to the configured Groww account through
+the private order server.</li>
 <li><strong>Usage data:</strong> session cookies to keep you signed in. No analytics or ad trackers.</li>
 </ul>
 <h2>How it's used</h2>
@@ -112,8 +113,9 @@ restricted to an explicit allow-list of Google accounts.</p>
 TERMS_BODY = """
 <p>By signing in to Trade Brain you agree to the following.</p>
 <h2>Nature of the service</h2>
-<p>Trade Brain is a personal research tool that displays market signals derived from options data. It is
-<strong>signal-only</strong>: it never places, modifies or cancels any order on your behalf.</p>
+<p>Trade Brain is a personal research tool that displays market signals derived from options data. The owner can
+separately enable real broker execution through the configured Groww order server. All trading decisions and their
+outcomes are the owner's responsibility.</p>
 <h2>Not investment advice</h2>
 <p>Nothing shown in this app is investment, legal or tax advice. All trading decisions and their outcomes are
 entirely your own responsibility.</p>
@@ -480,6 +482,30 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
                 h = await asyncio.to_thread(H.from_files, s.data_dir, days)
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": f"history unavailable: {type(e).__name__}"}, status_code=503)
+        return JSONResponse(h, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/mode-history")
+    async def api_mode_history(request: Request, mode: str = "balanced", days: int = 365, day: str | None = None):
+        u = user(request)
+        if not u:
+            return JSONResponse({"error": "sign in"}, status_code=401)
+        from tbrain import history as H
+        if mode not in H.MODE_NAMES:
+            return JSONResponse({"error": "mode must be conservative, balanced, aggressive or custom"}, status_code=400)
+        if day:
+            try:
+                if date.fromisoformat(day).isoformat() != day:
+                    raise ValueError
+            except ValueError:
+                return JSONResponse({"error": "day must be YYYY-MM-DD"}, status_code=400)
+        days = max(1, min(int(days), 365))
+        try:
+            if db is not None:
+                h = await asyncio.to_thread(H.from_mongo_modes, db, s.owner_email or "local", mode, days, day)
+            else:
+                h = await asyncio.to_thread(H.from_mode_files, s.data_dir, mode, days, day)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"mode history unavailable: {type(e).__name__}"}, status_code=503)
         return JSONResponse(h, headers={"Cache-Control": "no-store"})
 
     def _owner_redirect(request: Request):
