@@ -272,7 +272,8 @@ def test_hosted_day_guards(monkeypatch):
     ts.save(OWNER, "TOK", now=mon)
     d = {}
     assert run_hosted_day(s, d, log, FakeRecorder, ts, now=mon) == "done" and ran == ["TOK"] and "state" in d
-    assert run_hosted_day(s, d, log, FakeRecorder, ts, now=mon) == "already-running"   # state is fresh
+    # A recent dashboard snapshot is not a process lock; the durable lease is released after each run.
+    assert run_hosted_day(s, d, log, FakeRecorder, ts, now=mon) == "done" and ran == ["TOK", "TOK"]
 
 
 def test_rule_switches_owner_only_json_only():

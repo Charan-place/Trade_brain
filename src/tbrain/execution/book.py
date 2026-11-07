@@ -13,9 +13,11 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from tbrain.execution.broker import CANCELLED, DONE, FILLED, OPEN, REJECTED, BrokerError, tick_down, tick_up
+from tbrain.timeutil import IST
 
 ACTIVE = ("approval", "entry", "open", "exiting")
 
@@ -43,6 +45,53 @@ class TradeBook:
         self.store = (Path(store_dir) / f"{name}.jsonl") if store_dir else None
         self.on_event = on_event
         self.errors = 0
+        # Real broker orders outlive the recorder process and must be resumed. PaperBroker's
+        # in-memory orders do not, so restoring its journal would leave dangling IDs (e.g. P1).
+        if self.name == "real":
+            self._restore_journal()
+
+    def _restore_journal(self) -> None:
+        """Restore the latest per-trade snapshots so a recorder restart can manage existing broker orders."""
+        if not self.store or not self.store.exists():
+            return
+        try:
+            with self.store.open() as f:
+                for line in f:
+                    try:
+                        row = json.loads(line)
+                        trade = row.get("trade")
+                        if isinstance(trade, dict):
+                            self.restore_trade(trade)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+        except OSError as e:
+            self.log(f"[{self.name}] execution journal restore failed: {e}")
+        self._recount_orders_today()
+
+    def restore_trade(self, trade: dict, event_names=None) -> None:
+        """Merge a durable trade snapshot; newer journal/Mongo state wins."""
+        if not isinstance(trade, dict) or trade.get("book") != self.name or not trade.get("id"):
+            return
+        today = datetime.fromtimestamp(self.now_fn() / 1000, IST).date()
+        created = datetime.fromtimestamp(float(trade.get("created_ms") or 0) / 1000, IST).date()
+        if trade.get("state") not in ACTIVE and created != today:
+            return
+        old = self.trades.get(trade["id"])
+        if old and float(old.get("updated_ms") or 0) > float(trade.get("updated_ms") or 0):
+            return
+        self.trades[trade["id"]] = dict(trade)
+        self._recount_orders_today()
+
+    def _recount_orders_today(self) -> None:
+        today = datetime.fromtimestamp(self.now_fn() / 1000, IST).date()
+        count = 0
+        for trade in self.trades.values():
+            for event in trade.get("events") or ():
+                ms = event.get("ms") or 0
+                if ms and datetime.fromtimestamp(ms / 1000, IST).date() == today and event.get("event") in (
+                        "entry_sent", "stop_placed", "exit_sent"):
+                    count += 1
+        self.orders_today = max(self.orders_today, count)
 
     # ------------------------------------------------------------------ helpers
     def _rec(self, t: dict, event: str, **extra) -> None:

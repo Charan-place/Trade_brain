@@ -25,7 +25,8 @@ CONFIRM_PHRASE = "yes use my real money"
 
 class ExecutionHub:
     def __init__(self, s, store, log=print, real_broker=None, store_dir: Path | None = None, now_fn=None,
-                 on_event=None, control_poll_s: float = 2.0, real_enabled: bool = True):
+                 on_event=None, control_poll_s: float = 2.0, real_enabled: bool = True,
+                 defer_worker: bool = False):
         self.s, self.store, self.log = s, store, log
         self.now_fn = now_fn or (lambda: time.time() * 1000)
         self._emit = on_event
@@ -47,6 +48,7 @@ class ExecutionHub:
         self._quotes: dict[str, dict] = {}
         self._mismatch = 0
         self._last_reconcile = -1e18
+        self.recovery_ok = True
         self._skips: dict[str, dict] = {}     # call_id -> real skip record when there is no real book at all
         self._selected_mode = self._get_selected_mode()
         self._day = None
@@ -55,9 +57,41 @@ class ExecutionHub:
         self._async = bool(real_broker is not None and getattr(real_broker, "remote", False))
         self._q: queue.Queue = queue.Queue()
         self._stop = threading.Event()
-        self._poll(force=True)
-        if self._async:          # real orders go over the network: never block the brain's 250 ms loop
+        self._worker_started = False
+        if not defer_worker:
+            self._poll(force=True)
+            if self._async:
+                self.start_worker()
+
+    def start_worker(self) -> None:
+        if self._async and not self._worker_started:
+            self._poll(force=True)
+            self._worker_started = True
             threading.Thread(target=self._worker, daemon=True, name="real-orders").start()
+
+    def restore_real_trades(self, documents) -> int:
+        """Merge Mongo's durable execution snapshots before new signals are handled."""
+        if self.real is None:
+            return 0
+        restored = 0
+        orders_today = 0
+        today = datetime.fromtimestamp(self.now_fn() / 1000, IST).date()
+        for doc in documents:
+            if not isinstance(doc, dict):
+                continue
+            events = doc.get("events") or ()
+            self.real.restore_trade(doc)
+            restored += 1
+            created = datetime.fromtimestamp(float(doc.get("created_ms") or 0) / 1000, IST).date()
+            if created == today:
+                orders_today += sum((e.get("event") if isinstance(e, dict) else e)
+                                    in ("entry_sent", "stop_placed", "exit_sent") for e in events)
+        self.real.orders_today = max(self.real.orders_today, orders_today)
+        self._rday = today  # preserve today's recovered order count through the first execution cycle
+        active = len(self.real.open_trades())
+        if active:
+            self.log(f"[real] restored {active} active broker trade(s); reconciling orders and positions")
+        return restored
 
     # ------------------------------------------------------------------ control (switch, cap, commands)
     def loss_cap(self) -> float:
@@ -240,6 +274,8 @@ class ExecutionHub:
 
     def _real_gate(self, t: dict, call: dict):
         b = self.real.broker
+        if not self.recovery_ok:
+            return False, "execution recovery could not be verified; real entries are paused"
         if not self.real_on:
             return False, self.why_off or "real money is off"
         if not getattr(b, "connected", False):

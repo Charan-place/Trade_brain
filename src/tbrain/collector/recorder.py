@@ -214,7 +214,20 @@ class Recorder:
             self.hub = ExecutionHub(self.s, self.settings_store, log=self.log,
                                     real_broker=self.real_broker if real_enabled else None, real_enabled=real_enabled,
                                     store_dir=self.s.data_dir / "exec",
-                                    on_event=(self.sink.on_exec_event if self.sink else None))
+                                    on_event=(self.sink.on_exec_event if self.sink else None),
+                                    defer_worker=bool(self.real_broker and getattr(self.real_broker, "remote", False)))
+            if self.sink and self.hub.real is not None:
+                try:
+                    docs = list(self.sink.db.exec_trades.find({"owner": self.s.owner_email, "book": "real"}))
+                    restored = self.hub.restore_real_trades(docs)
+                    self.log(f"[real] recovery checked {restored} durable trade record(s)")
+                except Exception as e:  # noqa: BLE001 - fail closed for new real entries if recovery cannot be checked
+                    self.hub.recovery_ok = False
+                    self.log(f"[real] execution recovery unavailable; new real entries paused: {type(e).__name__}")
+            elif self.hub.real is not None:
+                self.hub.recovery_ok = False
+                self.log("[real] durable execution store unavailable; new real entries paused")
+            self.hub.start_worker()
             sink, hub = self.sink, self.hub
 
             engine.hub = hub
