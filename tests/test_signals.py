@@ -6,7 +6,7 @@ import pytest
 from tbrain.analytics import black76 as b
 from tbrain.analytics.chain import analyze
 from tbrain.brain.features import FeatureTracker
-from tbrain.signals.engine import EngineConfig, SignalEngine
+from tbrain.signals.engine import EngineConfig, SignalEngine, real_cost_per_lot
 from tbrain.timeutil import IST
 
 LOT, R = 65, 0.065
@@ -94,6 +94,34 @@ def test_tracking_t1_breakeven_then_t2_and_scoreboard(tmp_path):
     assert again.calls[c["id"]]["outcome"] == "T2"
 
 
+def test_t1_stop_uses_option_premium_and_does_not_claim_false_breakeven():
+    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    tr = _tracker(); ctx = _ctx()
+    (c,) = eng.step(NOW_MS, {"NIFTY": ctx}, tr)["calls"]
+    key = c["instrument_key"]
+    ctx1 = dict(ctx, spot=c["u_t1"] + 1)
+    ctx1["quotes"] = dict(ctx["quotes"]); ctx1["quotes"][key] = {"bp1": c["p_t1"], "ltp": c["p_t1"]}
+    eng.step(NOW_MS + 60_000, {"NIFTY": ctx1}, tr)
+    assert eng.calls[c["id"]]["status"] == "t1"
+    # The index remains above the underlying breakeven, but the option has decayed below entry.
+    ctx2 = dict(ctx1, spot=c["u_entry"] + 10)
+    ctx2["quotes"] = dict(ctx1["quotes"]); ctx2["quotes"][key] = {"bp1": c["entry"] - 1, "ltp": c["entry"] - 0.5}
+    eng.step(NOW_MS + 120_000, {"NIFTY": ctx2}, tr)
+    done = eng.calls[c["id"]]
+    assert done["outcome"] == "T1_STOP" and done["pnl_per_lot"] < 0
+
+
+def test_stale_option_quote_blocks_signal_entry():
+    ctx = _ctx()
+    atm = next(r for r in ctx["chains"]["2026-10-27"]["rows"] if r["atm"])
+    key = atm["ce"]["key"]
+    ctx["quotes"][key] = dict(ctx["quotes"][key], recv_ns=int((NOW_MS - 10_000) * 1e6))
+    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    result = eng.step(NOW_MS, {"NIFTY": ctx}, _tracker())
+    assert not result["calls"]
+    assert "quote stale" in (result["diagnostics"]["NIFTY"]["blocked"] or "")
+
+
 def test_stop_loss_path(tmp_path):
     eng = SignalEngine(EngineConfig(), store_dir=tmp_path, log=lambda *a: None)
     tr = _tracker(); ctx = _ctx()
@@ -170,7 +198,7 @@ def test_v2_blocks_counter_trend_call():
     d = blk["diagnostics"]["NIFTY"]
     assert not blk["calls"] and d["blocked"] and "trend" in d["blocked"]
     assert d["sides"]["bullish"]["required_ok"] is False
-    off = SignalEngine(EngineConfig(trend_k=None), store_dir=None, log=lambda *a: None)  # switch off -> v1 behaviour
+    off = SignalEngine(EngineConfig(trend_k=None, cost_per_lot_inr=40.0), store_dir=None, log=lambda *a: None)  # v1 behaviour
     assert off.step(NOW_MS, {"NIFTY": _falling(_ctx())}, _tracker())["calls"]
 
 
@@ -211,6 +239,11 @@ def test_v2_premium_stop_fires_before_index_stop(tmp_path):
     assert eng2.calls[d["id"]]["status"] == "open"
 
 
+def test_blocker_key_catches_both_levels_messages():
+    assert SignalEngine.blocker_key("no levels") == "levels"
+    assert SignalEngine.blocker_key("premium levels not ordered after time decay (move too small)") == "levels"
+
+
 def test_v21_defaults_from_backtest():
     c = EngineConfig()
     assert c.require_vwap and c.trend_k == 1.5
@@ -218,7 +251,7 @@ def test_v21_defaults_from_backtest():
 
 
 def test_v2_correlated_call_is_flagged():
-    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    eng = SignalEngine(EngineConfig(cost_per_lot_inr=40.0), store_dir=None, log=lambda *a: None)
     tr = _tracker()
     for i in range(1201):
         tr.sample("SENSEX", NOW_MS / 1000 - 1200 + i, {"cvd": 100.0 * i, "fut": 82060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
@@ -226,6 +259,27 @@ def test_v2_correlated_call_is_flagged():
     blk = eng.step(NOW_MS, {"NIFTY": _ctx(), "SENSEX": _ctx(spot=82000.0)}, tr)
     calls = sorted(blk["calls"], key=lambda c: c["und"])
     assert len(calls) == 2 and any(c["correlated_with"] for c in calls)
+
+
+def test_v2_correlation_block_switch():
+    # off by default: both same-direction calls fire (just flagged, per the test above)
+    eng_off = SignalEngine(EngineConfig(cost_per_lot_inr=40.0), store_dir=None, log=lambda *a: None)
+    tr = _tracker()
+    for i in range(1201):
+        tr.sample("SENSEX", NOW_MS / 1000 - 1200 + i, {"cvd": 100.0 * i, "fut": 82060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
+                                                     "pe_oi_near": 5e5 + 300 * i, "ce_oi_near": 5e5 + 100 * i, "straddle": 900.0})
+    blk_off = eng_off.step(NOW_MS, {"NIFTY": _ctx(), "SENSEX": _ctx(spot=82000.0)}, tr)
+    assert len(blk_off["calls"]) == 2
+
+    # on: the second same-direction call is blocked (shadowed) instead of firing live
+    eng_on = SignalEngine(EngineConfig(correlation_block=True, cost_per_lot_inr=40.0), store_dir=None, log=lambda *a: None)
+    tr2 = _tracker()
+    for i in range(1201):
+        tr2.sample("SENSEX", NOW_MS / 1000 - 1200 + i, {"cvd": 100.0 * i, "fut": 82060 + 0.05 * i, "fut_oi": 1e6 + 50 * i,
+                                                      "pe_oi_near": 5e5 + 300 * i, "ce_oi_near": 5e5 + 100 * i, "straddle": 900.0})
+    blk_on = eng_on.step(NOW_MS, {"NIFTY": _ctx(), "SENSEX": _ctx(spot=82000.0)}, tr2)
+    assert len(blk_on["calls"]) == 1
+    assert any("correlation block" in b for s in eng_on.shadows.values() for b in s.get("blocked_by") or [])
 
 
 def test_v2_loss_pause_switch():
@@ -272,6 +326,36 @@ def test_shadow_tracks_blocked_candidate_to_outcome(tmp_path):
     assert (tmp_path / "shadow.jsonl").exists() and not (tmp_path / "calls.jsonl").exists()
     again = SignalEngine(EngineConfig(), store_dir=tmp_path, log=lambda *a: None)
     assert again.shadows[s["id"]]["outcome"] == "T2"  # survives restarts
+
+
+def test_real_cost_per_lot_reflects_stt_and_exceeds_old_flat_placeholder():
+    cost = real_cost_per_lot(entry_px=166.20, exit_px=166.20, lot=65)
+    assert cost > 40.0   # the old flat placeholder understated real STT/brokerage/exchange/GST costs
+    assert real_cost_per_lot(100.0, 200.0, 65) > real_cost_per_lot(100.0, 100.0, 65)  # STT scales with exit premium
+
+
+def test_default_cost_model_uses_real_cost_not_the_old_flat_placeholder():
+    eng = SignalEngine(EngineConfig(), store_dir=None, log=lambda *a: None)
+    assert eng.cfg.cost_per_lot_inr is None
+    blk = eng.step(NOW_MS, {"NIFTY": _ctx()}, _tracker())
+    (c,) = blk["calls"]
+    assert c["cost_est_per_lot"] > 40.0
+
+
+def test_one_clue_short_of_min_score_is_shadowed_not_dropped():
+    ctx = _ctx(); ctx["big_net"] = 0.0                       # big-players clue fails -> score 6 of 7
+    eng = SignalEngine(EngineConfig(min_score=7), store_dir=None, log=lambda *a: None)
+    blk = eng.step(NOW_MS, {"NIFTY": ctx}, _tracker())
+    assert blk["diagnostics"]["NIFTY"]["sides"]["bullish"]["score"] == 6
+    assert not blk["calls"]
+    (sh,) = eng.shadows.values()
+    assert sh["score"] == 6 and sh["playbook"] == "breakout"
+    assert "score threshold" in {SignalEngine.blocker_key(b) for b in sh["blocked_by"]}
+    # two clues short is still not tracked (keeps shadow volume meaningful)
+    ctx2 = _ctx(); ctx2["big_net"] = 0.0; ctx2["flow"] = {"obi": 0.0, "resting_imbalance": 0.0}
+    eng2 = SignalEngine(EngineConfig(min_score=7), store_dir=None, log=lambda *a: None)
+    eng2.step(NOW_MS, {"NIFTY": ctx2}, _tracker())
+    assert not eng2.shadows
 
 
 def test_regime_gate_switch():

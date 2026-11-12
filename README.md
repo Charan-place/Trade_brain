@@ -1,11 +1,12 @@
 # Trade Brain — Nifty 50 + Sensex options
 
-A personal research tool that **records** live Nifty 50 (NSE) and Sensex (BSE) option data from Upstox, **analyses**
-it (own IV/Greeks, OI, order flow, big prints), shows everything in a **live brain UI**, and issues **signal-only
-calls** (option, expiry, entry, stop loss, targets, reasons) that it then tracks and scores.
+A personal trading research tool that **records** live Nifty 50 (NSE) and Sensex (BSE) option data from Upstox,
+**analyses** it (own IV/Greeks, OI, order flow, big prints), compares three independently tracked strategy profiles in a
+**live brain UI**, and can optionally route the selected profile's entries to the owner's broker.
 
-> **It never places orders.** You decide and trade manually. The signal engine is **EXPERIMENTAL** (rule-based, no
-> track record yet). Calls are probabilities, never certainties. Not investment advice. Personal use only —
+> **Real broker execution is optional and owner-controlled.** It is off unless explicitly connected and enabled in the
+> dashboard; use the paper book and mode comparison first. The signal engine is **EXPERIMENTAL** (rule-based, not a
+> calibrated probability model). Personal use only —
 > sharing or selling calls to others requires SEBI Research Analyst registration.
 
 ---
@@ -24,6 +25,7 @@ calls** (option, expiry, entry, stop loss, targets, reasons) that it then tracks
 11. [Roadmap](#11-roadmap)
 12. [MongoDB (training data)](#12-mongodb-training-data)
 13. [Deploy on Modal (hosted, Google sign-in)](#13-deploy-on-modal-hosted-google-sign-in)
+14. [Paper and real trading (Groww, owner only)](#14-paper-and-real-trading-groww-owner-only)
 
 ---
 
@@ -125,6 +127,14 @@ What the two processes are:
 - **UI** = your browser tab at `http://127.0.0.1:8765` (local only). Close/reopen it anytime; recording continues.
 - When *not* recording, `uv run tbrain ui` shows the last session (mode **LAST SESSION**) or a probe replay (**DEMO**).
 
+The strategy picker runs **Conservative, Balanced, and Aggressive** independently against the same feed. The dashboard
+shows each profile's modeled calls and daily P&L (entry at ask, exits marked at bid, estimated costs); only the selected
+profile can create new real broker entries. Existing filled real positions keep their originating profile's exit rules
+when you change the selection. The comparison is a counterfactual signal model, not a claim that those simulated fills
+would have been achieved by a broker. In **Strategy Lab → Past sessions**, select a profile and date to review its
+modeled return, rule snapshot, and individual trades. The recorder saves daily profile snapshots to MongoDB and
+backfills prior mode call logs when it next starts; historical results begin where persisted profile data exists.
+
 `caffeinate -i` keeps the Mac awake while recording. Closing the lid still sleeps the Mac (unless on an external display).
 
 ---
@@ -177,7 +187,7 @@ The brain only suggests. If **you** choose to act on a call:
 | `uv run tbrain instruments [--refresh]` | Download/inspect NIFTY + SENSEX contracts (expiries, lots, index keys) |
 | `uv run tbrain probe [--seconds 30]` | Short live test; saves raw decoded samples to `data/probe/` |
 | `caffeinate -i uv run tbrain record` | Full session: waits for 09:00, records, runs the brain + engine + UI, stops 15:35 |
-| `uv run tbrain record --now --seconds 120` | Test run right now (ignores market hours) |
+| `uv run tbrain record --now --seconds 120` | Bounded test run right now (ignores market hours; real broker execution is disabled) |
 | `uv run tbrain record --no-ui` / `--no-browser` / `--ui-port 8766` | Variants |
 | `uv run tbrain ui [--demo]` | UI without recording (last session or probe replay) |
 | `uv run tbrain report [--date YYYY-MM-DD]` | Coverage + gap report for a recorded day |
@@ -201,7 +211,7 @@ The brain only suggests. If **you** choose to act on a call:
 | `TBRAIN_TREND_K` | `1.5` | v2: last-60-min index move must be ≥ k × ATR in the call's direction (`off` disables) |
 | `TBRAIN_LOSS_PAUSE_N` | `0` | Pause an index after N consecutive SLs (off by default) |
 | `TBRAIN_REGIME_GATE` | `0` | Breakout calls only in a `trend` regime |
-| `TBRAIN_AFTERNOON_CUTOFF` | `13:00` | v2.2: no new calls after this time (`off` = none). Dashboard switch *Afternoon calls* overrides it live |
+| `TBRAIN_AFTERNOON_CUTOFF` | `12:00` | v2.2: no new calls after this time (`off` = none). Dashboard switch *Afternoon calls* overrides it live |
 | `TBRAIN_ALLOW_AFTERNOON` | `0` | Start with afternoon calls allowed |
 | `TBRAIN_DD_STOP`, `TBRAIN_DD_PEAK_R`, `TBRAIN_DD_GIVEBACK_R` | `1`, `2`, `2` | v2.2 drawdown stop (dashboard switch *Drawdown stop*) |
 | `TBRAIN_PREMIUM_STOP` | `0` | Also stop when the option bid+LTP hit the SL premium |
@@ -209,13 +219,18 @@ The brain only suggests. If **you** choose to act on a call:
 | `TBRAIN_N_STRIKES` / `TBRAIN_N_EXPIRIES` | `10` / `2` | Chain width recorded |
 | `TBRAIN_UNDERLYINGS` | `NIFTY:NSE_FO,SENSEX:BSE_FO` | What to record |
 | `TBRAIN_RISK_FREE` | `0.065` | Discount rate for Black-76 (placeholder) |
-| `MONGODB_URI`, `MONGODB_DB` | — / `tbrain` | Optional. Saves calls, shadows, minute features, sessions to MongoDB (section 12) |
+| `MONGODB_URI`, `MONGODB_DB` | — / `tbrain` | Optional. Saves calls, shadows, minute features, sessions and per-mode daily archives to MongoDB (section 12) |
 | `TBRAIN_DATA_DIR`, `TBRAIN_SECRETS_DIR` | `data/`, `.secrets/` | Where files go (set automatically on Modal) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | Hosted app: Google sign-in (section 13) |
 | `TBRAIN_ALLOWED_EMAILS` | — | Hosted app: comma-separated Gmail addresses allowed in; `*` = any verified Google account |
 | `TBRAIN_OWNER_EMAIL` | first allowed email | Hosted app: the account whose Upstox login feeds the brain |
 | `TBRAIN_SESSION_SECRET`, `TBRAIN_ENCRYPTION_KEY` | — | Hosted app: cookie signing key; Fernet key that encrypts Upstox tokens in MongoDB |
 | `TBRAIN_PUBLIC_URL` | — | Hosted app: its https address (used for redirects and secure cookies) |
+| `TBRAIN_REAL_DAILY_LOSS_CAP` / `_MAX` | `3000` / `10000` | Real money: daily loss cap (editable on the dashboard, never above the max) |
+| `TBRAIN_REAL_LOTS`, `TBRAIN_REAL_MAX_OPEN`, `TBRAIN_REAL_MAX_ORDERS` | `1`, `2`, `20` | Real money: lots per call, open trades, orders per day |
+| `TBRAIN_REAL_CONFIRM_EACH` | `1` | Real money: each entry waits for your *Approve* click |
+| `TBRAIN_REAL_MAX_PRICE_GAP_PCT`, `TBRAIN_REAL_SAFETY_STOP_R`, `TBRAIN_REAL_ENTRY_TIMEOUT_S` | `1.0`, `2.0`, `20` | Real money: Groww vs Upstox price check, resting stop, entry wait |
+| `TBRAIN_ORDER_SERVER_URL`, `_TOKEN`, `_CERT` | — | Real money: the static-IP order server (section 14) |
 
 ---
 
@@ -302,6 +317,7 @@ model learns from:
 | `shadows` | blocked candidate | same as calls + which filter blocked it — the negative/positive examples |
 | `features` | underlying × minute | spot, VWAP, ATR, regime, order flow, big prints, chain (IV, skew, PCR, max pain, walls), clue values |
 | `daily` | day | summary + filter scorecard + rules in force |
+| `mode_daily` | day × strategy profile | modeled calls, return summary, and rule snapshot for date/profile archive |
 | `sessions` | recorder run | health/gap manifest |
 | `users`, `upstox_tokens` | Google account | hosted-app users; their Upstox token **encrypted** (Fernet) |
 
@@ -321,7 +337,9 @@ on disk remain the source of truth). Free-tier limits: 0.5 GB storage, 100 ops/s
 
 What you get: a private `https://…modal.run` address. Sign in with Google → live dashboard on phone/laptop.
 Each morning tap **Connect Upstox** (Upstox tokens expire daily) → the brain starts within a minute and runs until
-15:35 IST. A 09:00 IST weekday schedule also starts it if you connected earlier. Signal-only: it never places orders.
+15:35 IST. A 09:00 IST weekday schedule also starts it if you connected earlier. All three mode comparisons run each
+day; per-mode session results and modeled trades are archived in MongoDB. Owner-only real execution follows the
+selected mode when explicitly enabled.
 
 **Cost:** Modal's Starter plan includes $30/month of free credit; ~7 h/day on 1 CPU + 2 GB in Mumbai is estimated at
 roughly $11–17/month from Modal's published per-second prices (check the Modal dashboard for real usage; Volume
@@ -367,6 +385,52 @@ Notes: Modal may occasionally restart a container; the brain rebuilds today's ch
 open calls (about a minute lost). Modal's free plan keeps logs for 1 day — MongoDB keeps the history.
 Opening the app to the public (each user with their own Upstox) is a separate step: check SEBI rules on research
 recommendations and Upstox's API terms first.
+
+---
+
+## 14. Paper and real trading (Groww, owner only)
+
+Only the owner (`TBRAIN_OWNER_EMAIL`) sees the Paper and Real columns, the Real money card and their history.
+Everyone else sees the brain and its calls only.
+
+**Three books per call.** *Signal* is the engine's call. *Paper* fills at the live bid/ask and always runs, whatever
+you do with real trades. *Real* places orders on your Groww account through the order server.
+
+**A real entry happens only when all of these hold:** the switch is on (typed phrase `yes use my real money`),
+Groww is connected today, it is before 15:15, the daily loss cap is not hit, the contract maps exactly
+(token, strike, expiry, CE/PE, lot), Groww's ask is within 1% of Upstox's, and the margin covers the order.
+Otherwise the real leg is skipped with a reason; paper goes on.
+
+**Orders.** Entry is a LIMIT at `min(ask, zone top)` (never chases; missed after 20 s). A safety SL-M rests at −2R on the
+premium (−1R after T1). Exits follow the signal: cancel the stop, then sell at MARKET, never more than you hold.
+15:20 squares off everything. Positions are checked against Groww every 5 s; two mismatches in a row turn real off.
+
+**Turning off** is one click: open real trades are sold at the current price, then Groww is disconnected until you
+connect again. Hitting the loss cap does the same automatically. *Exit* / *Exit all* buttons close real trades early.
+
+### Why a separate VM
+SEBI's retail-algo rules (from 1 Apr 2026) need orders to come from a **static IP whitelisted with the broker**.
+Modal's IPs change, so a small VM with a fixed IP places the orders; Modal still runs the brain and the website.
+
+### One-time setup
+1. **VM**: AWS Lightsail → Mumbai → Ubuntu 24.04 → $7 plan. Networking → attach a **static IP**; firewall → add TCP 8443.
+2. **Groww**: subscribe to the Trading API, create an API key + secret, add the VM's static IP to the key.
+3. On the VM: `git clone <repo> ~/trade_brain_algorithm && cd ~/trade_brain_algorithm && bash deploy/orderserver_setup.sh <STATIC_IP>`
+4. `nano ~/tbrain-orderserver/.env` → fill `GROWW_API_KEY`, `GROWW_API_SECRET` (the token is generated for you), then
+   `sudo systemctl restart tbrain-orderserver`.
+5. Add `TBRAIN_ORDER_SERVER_URL`, `TBRAIN_ORDER_SERVER_TOKEN`, `TBRAIN_ORDER_SERVER_CERT` (printed by the script) to the
+   Modal secret `tbrain-secrets`, then `modal deploy deploy/modal_app.py`.
+
+Groww keys live only on the VM. Every request from Modal is HMAC-signed (30 s window, no replays) over TLS pinned to
+the VM's own certificate.
+
+### Daily use
+1. Approve today's access on Groww's **API Keys** page.
+2. Dashboard → Real money card → **Connect Groww**.
+3. Type `yes use my real money` → **Turn on**. Adjust the loss cap if you like.
+4. With *confirm each* on, press **Approve** on each real entry within 45 s.
+
+Suggested rollout: two weeks of paper only → real at 1 lot with confirm-each → automatic.
 
 ---
 

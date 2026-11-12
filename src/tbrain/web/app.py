@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -58,7 +59,7 @@ small{display:block;margin-top:20px;color:var(--ink2);font-size:12px;text-align:
 </style></head><body><div class="card">
 <div class="mark">TB</div>
 <h1>Trade Brain</h1>
-<p>NIFTY + SENSEX options brain. Signal-only &mdash; it never places orders.</p>
+<p>NIFTY + SENSEX options brain. Three-mode research with optional owner-controlled broker execution.</p>
 <a class="btn" href="/login">
 <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18Z"/><path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 0 1 3.68 9c0-.6.1-1.18.29-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.05l3.01-2.33Z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.51.46 3.44 1.35l2.59-2.59C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z"/></svg>
 Sign in with Google</a>__ERR__
@@ -92,9 +93,9 @@ sell or share your data with third parties.</p>
 <ul>
 <li><strong>Google account:</strong> your email, name and profile info via Google Sign-In, used only to identify
 you and check you're on the allowed list.</li>
-<li><strong>Upstox access token:</strong> if you connect a broker account, your Upstox access token is stored
-encrypted and used only to read market data (quotes, option chains). The app never places, modifies or
-cancels orders.</li>
+<li><strong>Upstox access token:</strong> if connected, the encrypted token is used to read market data (quotes,
+option chains). If the owner separately enables real execution, orders are sent to the configured Groww account through
+the private order server.</li>
 <li><strong>Usage data:</strong> session cookies to keep you signed in. No analytics or ad trackers.</li>
 </ul>
 <h2>How it's used</h2>
@@ -112,8 +113,9 @@ restricted to an explicit allow-list of Google accounts.</p>
 TERMS_BODY = """
 <p>By signing in to Trade Brain you agree to the following.</p>
 <h2>Nature of the service</h2>
-<p>Trade Brain is a personal research tool that displays market signals derived from options data. It is
-<strong>signal-only</strong>: it never places, modifies or cancels any order on your behalf.</p>
+<p>Trade Brain is a personal research tool that displays market signals derived from options data. The owner can
+separately enable real broker execution through the configured Groww order server. All trading decisions and their
+outcomes are the owner's responsibility.</p>
 <h2>Not investment advice</h2>
 <p>Nothing shown in this app is investment, legal or tax advice. All trading decisions and their outcomes are
 entirely your own responsibility.</p>
@@ -206,10 +208,12 @@ a.back{{color:var(--ink2);text-decoration:none;font-size:13px;display:inline-blo
 
 
 def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_upstox_connected=None,
-               settings_store=None) -> FastAPI:
+               settings_store=None, order_broker_factory=None) -> FastAPI:
     """Build the app. Dependencies are injectable so tests can run without Google, Mongo or Modal."""
     if not s.session_secret:
         raise RuntimeError("TBRAIN_SESSION_SECRET is not set")
+    if order_broker_factory is None:
+        order_broker_factory = s.order_broker
     if settings_store is None:
         from tbrain.runtime_settings import FileSettings
         settings_store = FileSettings(s.data_dir / "live" / "settings.json")
@@ -262,7 +266,7 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
         return None
 
     def is_owner(u: dict) -> bool:
-        return bool(s.owner_email) and u["email"] == s.owner_email
+        return bool(u) and bool(s.owner_email) and u.get("email") == s.owner_email
 
     def base(request: Request) -> str:
         return s.public_url or str(request.base_url).rstrip("/")
@@ -380,9 +384,9 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
 
     @app.get("/upstox/callback")
     async def upstox_callback(request: Request):
-        u = user(request)
-        if not u or not is_owner(u):
-            return RedirectResponse("/", status_code=303)
+        u, err = _owner_redirect(request)
+        if err:
+            return err
         expected = request.session.pop("upstox_state", None)
         code, state = request.query_params.get("code"), request.query_params.get("state")
         if not code or not expected or not secrets.compare_digest(str(state), expected):
@@ -400,48 +404,214 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
                 pass
         return RedirectResponse("/", status_code=303)
 
+    def csrf_token(request: Request) -> str:
+        tok = request.session.get("csrf")
+        if not tok:
+            tok = secrets.token_urlsafe(24)
+            request.session["csrf"] = tok
+        return tok
+
+    def csrf_ok(request: Request, token: str) -> bool:
+        expected = request.session.get("csrf")
+        return bool(expected) and secrets.compare_digest(token or "", expected)
+
     @app.get("/admin/access", response_class=HTMLResponse)
     async def admin_access(request: Request):
-        u = user(request)
-        if not u or not is_owner(u):
-            return RedirectResponse("/", status_code=303)
+        u, err = _owner_redirect(request)
+        if err:
+            return err
         if db is None:
             return PlainTextResponse("Server is missing MONGODB_URI.", status_code=500)
+        tok = csrf_token(request)
         rows = []
         for doc in db.access.find().sort("requested_at", -1):
             email, status = doc["_id"], doc.get("status", "pending")
             name = doc.get("name") or ""
             from urllib.parse import quote
-            actions = "".join(
-                f'<form method="post" action="/admin/access/{a}?email={quote(email)}" style="display:inline">'
-                f'<button class="a-{a}">{a.title()}</button></form>'
-                for a in (("approve", "deny") if status != "approved" else ("deny",)))
+
+            def form(action: str, cls: str) -> str:
+                return (f'<form method="post" action="/admin/access/{action}?email={quote(email)}" style="display:inline">'
+                        f'<input type="hidden" name="csrf" value="{tok}">'
+                        f'<button class="a-{cls}">{action.title()}</button></form>')
+
+            actions = "".join(form(a, a) for a in (("approve", "deny") if status != "approved" else ("deny",)))
             if status == "denied":
-                actions += (f'<form method="post" action="/admin/access/approve?email={quote(email)}" style="display:inline">'
-                            f'<button class="a-approve">Approve</button></form>')
+                actions += form("approve", "approve")
             rows.append(f'<tr><td>{email}</td><td>{name}</td><td><span class="st st-{status}">{status}</span></td><td>{actions}</td></tr>')
         table = "\n".join(rows) or '<tr><td colspan="4" style="color:var(--ink2)">No access requests yet.</td></tr>'
         return HTMLResponse(ADMIN_HTML.format(rows=table))
 
     @app.post("/admin/access/approve")
-    async def admin_approve(request: Request, email: str = ""):
-        u = user(request)
-        if not u or not is_owner(u) or db is None:
-            return RedirectResponse("/", status_code=303)
+    async def admin_approve(request: Request, email: str = "", csrf: str = ""):
+        u, err = _owner_redirect(request)
+        if err or db is None or not csrf_ok(request, csrf):
+            return err or RedirectResponse("/", status_code=303)
         email = email.lower()
         if email:
             db.access.update_one({"_id": email}, {"$set": {"status": "approved"}}, upsert=True)
         return RedirectResponse("/admin/access", status_code=303)
 
     @app.post("/admin/access/deny")
-    async def admin_deny(request: Request, email: str = ""):
-        u = user(request)
-        if not u or not is_owner(u) or db is None:
-            return RedirectResponse("/", status_code=303)
+    async def admin_deny(request: Request, email: str = "", csrf: str = ""):
+        u, err = _owner_redirect(request)
+        if err or db is None or not csrf_ok(request, csrf):
+            return err or RedirectResponse("/", status_code=303)
         email = email.lower()
         if email:
             db.access.update_one({"_id": email}, {"$set": {"status": "denied"}}, upsert=True)
         return RedirectResponse("/admin/access", status_code=303)
+
+    @app.get("/api/history")
+    async def api_history(request: Request, days: int = 60, book: str = "signal"):
+        u = user(request)
+        if not u:
+            return JSONResponse({"error": "sign in"}, status_code=401)
+        from tbrain import history as H
+        days = max(1, min(int(days), 365))
+        if book not in ("signal", "paper", "real"):
+            return JSONResponse({"error": "book must be signal, paper or real"}, status_code=400)
+        if book != "signal" and not is_owner(u):
+            return JSONResponse({"error": "owner only"}, status_code=403)
+        try:
+            if book != "signal":
+                h = await asyncio.to_thread(H.from_mongo_exec, db, s.owner_email or None, book, days) if db is not None \
+                    else await asyncio.to_thread(H.from_exec_files, s.data_dir, book, days)
+            elif db is not None:
+                h = await asyncio.to_thread(H.from_mongo, db, s.owner_email or None, days)
+            else:
+                h = await asyncio.to_thread(H.from_files, s.data_dir, days)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"history unavailable: {type(e).__name__}"}, status_code=503)
+        return JSONResponse(h, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/mode-history")
+    async def api_mode_history(request: Request, mode: str = "balanced", days: int = 365, day: str | None = None):
+        u = user(request)
+        if not u:
+            return JSONResponse({"error": "sign in"}, status_code=401)
+        from tbrain import history as H
+        if mode not in H.MODE_NAMES:
+            return JSONResponse({"error": "mode must be conservative, balanced, aggressive or custom"}, status_code=400)
+        if day:
+            try:
+                if date.fromisoformat(day).isoformat() != day:
+                    raise ValueError
+            except ValueError:
+                return JSONResponse({"error": "day must be YYYY-MM-DD"}, status_code=400)
+        days = max(1, min(int(days), 365))
+        try:
+            if db is not None:
+                h = await asyncio.to_thread(H.from_mongo_modes, db, s.owner_email or "local", mode, days, day)
+            else:
+                h = await asyncio.to_thread(H.from_mode_files, s.data_dir, mode, days, day)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"mode history unavailable: {type(e).__name__}"}, status_code=503)
+        return JSONResponse(h, headers={"Cache-Control": "no-store"})
+
+    def _owner_redirect(request: Request):
+        """Shared owner-only gate for HTML/redirect routes (JSON API routes use _owner_json below).
+        Returns (user, None) on success, or (None, a RedirectResponse the caller must return) on failure."""
+        u = user(request)
+        if not u or not is_owner(u):
+            return None, RedirectResponse("/", status_code=303)
+        return u, None
+
+    # ---------------- real money (OWNER ONLY). Every other account sees signals only.
+    def _owner_json(request: Request):
+        u = user(request)
+        if not u:
+            return None, JSONResponse({"error": "sign in"}, status_code=401)
+        if not is_owner(u):
+            return None, JSONResponse({"error": "owner only"}, status_code=403)
+        if "application/json" not in (request.headers.get("content-type") or "") and request.method == "POST":
+            return None, JSONResponse({"error": "json only"}, status_code=415)
+        return u, None
+
+    @app.get("/api/real")
+    async def real_get(request: Request):
+        u, err = _owner_json(request)
+        if err:
+            return err
+        from tbrain.ui.server import offline_real_status
+        return {"real": await asyncio.to_thread(settings_store.get_real),
+                "defaults": {"loss_cap": s.real_daily_loss_cap, "loss_cap_max": s.real_loss_cap_max},
+                "status": await asyncio.to_thread(offline_real_status, s, settings_store)}
+
+    @app.post("/api/real")
+    async def real_set(request: Request):
+        u, err = _owner_json(request)
+        if err:
+            return err
+        from tbrain.execution.hub import CONFIRM_PHRASE
+        try:
+            body = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "bad json"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "bad json"}, status_code=400)
+        if "loss_cap" in body:
+            try:
+                cap = float(body["loss_cap"])
+            except (TypeError, ValueError):
+                return JSONResponse({"error": "loss cap must be a number"}, status_code=400)
+            if not (0 < cap <= s.real_loss_cap_max):
+                return JSONResponse({"error": f"loss cap must be between 1 and {s.real_loss_cap_max:,.0f}"}, status_code=400)
+            await asyncio.to_thread(settings_store.set_real, loss_cap=cap)
+        if "on" in body:
+            if body["on"] is True:
+                if str(body.get("confirm", "")).strip().lower() != CONFIRM_PHRASE:
+                    return JSONResponse({"error": f'type exactly: {CONFIRM_PHRASE}'}, status_code=400)
+                await asyncio.to_thread(settings_store.set_real, on=True, why_off=None)
+            elif body["on"] is False:
+                await asyncio.to_thread(settings_store.set_real, on=False, why_off="switched off by you")
+            else:
+                return JSONResponse({"error": "on must be true or false"}, status_code=400)
+        return {"real": await asyncio.to_thread(settings_store.get_real)}
+
+    @app.post("/api/real/connect")
+    async def real_connect(request: Request):
+        """Owner: log in to Groww for today through the static-IP order server."""
+        u, err = _owner_json(request)
+        if err:
+            return err
+        rb = order_broker_factory() if order_broker_factory else None
+        if rb is None:
+            return JSONResponse({"error": "order server is not set up yet (TBRAIN_ORDER_SERVER_URL / _TOKEN)"}, status_code=400)
+        try:
+            r = await asyncio.to_thread(rb.connect)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:300]}, status_code=502)
+        return {"connected": bool(r.get("connected"))}
+
+    @app.post("/api/real/exit")
+    async def real_exit(request: Request):
+        u, err = _owner_json(request)
+        if err:
+            return err
+        try:
+            body = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "bad json"}, status_code=400)
+        if isinstance(body, dict) and body.get("all") is True:
+            c = await asyncio.to_thread(settings_store.push_command, "exit_all")
+        elif isinstance(body, dict) and isinstance(body.get("call_id"), str) and body["call_id"]:
+            c = await asyncio.to_thread(settings_store.push_command, "exit", body["call_id"])
+        else:
+            return JSONResponse({"error": "send {call_id} or {all: true}"}, status_code=400)
+        return {"queued": c}
+
+    @app.post("/api/real/approve")
+    async def real_approve(request: Request):
+        u, err = _owner_json(request)
+        if err:
+            return err
+        try:
+            body = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "bad json"}, status_code=400)
+        if not (isinstance(body, dict) and isinstance(body.get("call_id"), str) and body["call_id"]):
+            return JSONResponse({"error": "send {call_id}"}, status_code=400)
+        return {"queued": await asyncio.to_thread(settings_store.push_command, "approve", body["call_id"])}
 
     @app.get("/api/settings")
     async def get_settings(request: Request):
@@ -471,12 +641,16 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
         if not user(request):
             return JSONResponse({"error": "sign in"}, status_code=401)
         st = await asyncio.to_thread(state_source.latest)
+        if not is_owner(user(request)):
+            st = {k: v for k, v in st.items() if k != "execution"}     # paper/real are owner-only
         return JSONResponse(st, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/stream")
     async def api_stream(request: Request):
         if not user(request):
             return JSONResponse({"error": "sign in"}, status_code=401)
+
+        owner = is_owner(user(request))
 
         async def gen():
             # Hosting platforms cap request time (Modal: 150 s), so each stream ends after STREAM_MAX_S and the
@@ -489,6 +663,8 @@ def create_app(s, *, state_source=None, db=None, tokens=None, oauth=None, on_ups
                 if asyncio.get_running_loop().time() - started > STREAM_MAX_S:
                     return
                 st = await asyncio.to_thread(state_source.latest)
+                if not owner:
+                    st = {k: v for k, v in st.items() if k != "execution"}   # paper/real are owner-only
                 payload = json.dumps(st, default=str, separators=(",", ":"))
                 if payload != last:
                     last = payload

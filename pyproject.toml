@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "tbrain"
 version = "0.1.0"
-description = "Nifty 50 + Sensex options brain: live recorder, analytics, signal-only engine and live UI (personal research use)"
+description = "Nifty 50 + Sensex options brain: live recorder, three-mode analytics, dashboard and optional owner-only execution"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

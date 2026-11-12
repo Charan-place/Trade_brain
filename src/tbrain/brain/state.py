@@ -27,6 +27,7 @@ BIG_KEEP_S = 900
 _DEPTH_KEYS = [f"{s}{n}" for n in range(1, DEPTH + 1) for s in ("bp", "bq", "ap", "aq")]
 MIN_SESSIONS_FOR_TRAINING = 20
 CHART_BARS = 400  # a full NSE/BSE session is 375 one-minute bars
+CHAIN_MAX_AGE_S = 30.0
 
 
 def _t_years(expiry, val: datetime) -> float:
@@ -95,10 +96,16 @@ class BrainState:
                     self.candles.update(k, ts, px, dv)
 
     def record_vwap(self, und: str, ts_ms: float, value: float) -> None:
+        # snapshot() calls this with non-decreasing ts_ms, so `h`'s insertion order is always chronological
+        # (a repeat minute just overwrites in place, keeping its original position) - no sort needed to evict
+        # or read it back in order.
         h = self.vwap_hist.setdefault(und, {})
-        h[int(ts_ms) - int(ts_ms) % 60_000] = value
+        m = int(ts_ms) - int(ts_ms) % 60_000
+        if m not in h and h and m < next(reversed(h)):
+            return  # out-of-order minute: ignore rather than corrupt chronological insertion order
+        h[m] = value
         if len(h) > CHART_BARS:
-            for k in sorted(h)[: len(h) - CHART_BARS]:
+            for k in list(h)[: len(h) - CHART_BARS]:
                 del h[k]
 
     def ingest_chain(self, chain_rows: list[dict]) -> None:
@@ -231,7 +238,7 @@ class BrainState:
             U["vwap_index_equiv"] = (vwap - U["future"]["basis"]) if vwap and U["future"].get("basis") is not None else None
             if U["vwap_index_equiv"] and mode == "live":
                 self.record_vwap(u, now_ms, U["vwap_index_equiv"])
-            U["vwap_series"] = sorted(self.vwap_hist.get(u, {}).items())
+            U["vwap_series"] = list(self.vwap_hist.get(u, {}).items())  # already chronological; see record_vwap
             ctxs[u]["vwap_index"] = U["vwap_index_equiv"]
         if self.engine:
             signals = self.engine.step(now_ms, ctxs, self.tracker)
@@ -272,16 +279,22 @@ class BrainState:
                 "oi_base": prev_oi[k] if use_prev else first.get(k, {}).get("oi"),
                 "ltp_base": row.get("cp") if use_prev else first.get(k, {}).get("ltp"),
                 "ltt_ms": row.get("ltt_ms"),
+                "recv_ns": row.get("recv_ns"),
             })
         chains = {}
         for exp in sorted(legs_by_exp)[:3]:
-            legs = legs_by_exp[exp]
+            observed = [l["recv_ns"] for l in legs_by_exp[exp] if l.get("recv_ns") is not None]
+            asof_ns = (int(now_dt.timestamp() * 1e9) if mode == "live" and in_market_hours(now_dt)
+                       else max(observed, default=int(now_dt.timestamp() * 1e9)))
+            legs = [l for l in legs_by_exp[exp] if l.get("recv_ns") is None or
+                    0 <= (asof_ns - l["recv_ns"]) / 1e9 <= CHAIN_MAX_AGE_S]
             if mode == "live" and in_market_hours(now_dt):
                 val = now_dt
             else:  # after hours / demo: value at the time the prices were made, not "now"
                 ltts = [l["ltt_ms"] for l in legs if l.get("ltt_ms")]
                 val = datetime.fromtimestamp(max(ltts) / 1000, IST) if ltts else now_ist()
             a = analyze(legs, _t_years(exp, val), self.r, spot)
+            a["stale_legs_excluded"] = len(legs_by_exp[exp]) - len(legs)
             a["expiry"] = exp.isoformat()
             a["valued_at"] = val.isoformat()
             a["baseline"] = "prev close (REST prev_oi)" if any(l["key"] in prev_oi for l in legs) else "session start"
@@ -299,6 +312,19 @@ class BrainState:
             out["vix"] = {"ltp": v.get("ltp"), "cp": v.get("cp")}
         return out
 
+    def _regime_layer(self, signals: dict) -> dict:
+        """Regime is computed every tick (trend / range / mixed) and saved on every call; it only BLOCKS calls when
+        the regime gate is on (off until the labels are recalibrated)."""
+        labels = {u: (d.get("regime") or {}).get("label") for u, d in (signals.get("diagnostics") or {}).items()}
+        labels = {u: l for u, l in labels.items() if l}
+        gate = bool(self.engine and getattr(self.engine.cfg, "regime_gate", False))
+        now = " · ".join(f"{u} {l}" for u, l in sorted(labels.items())) or "no reading yet"
+        if gate:
+            return {"id": "regime", "name": "Regime", "status": "on",
+                    "detail": f"Blocking breakout calls outside a trend. Now: {now}"}
+        return {"id": "regime", "name": "Regime", "status": "labelling" if labels else "off",
+                "detail": f"Labelling only (trend / range / mixed on each call), not blocking yet. Now: {now}"}
+
     def _layers(self, feed: dict, unds: dict, signals: dict) -> list[dict]:
         have_chain = any(u.get("chains") for u in unds.values())
         connected = feed.get("connected", False)
@@ -310,7 +336,7 @@ class BrainState:
              "detail": "Live IV, Greeks, moneyness, OI, flow, big prints, candles" if have_chain else "Waiting for data"},
             {"id": "memory", "name": "Memory", "status": "learning" if self.sessions_recorded else "off",
              "detail": f"{self.sessions_recorded} session(s) recorded; candles + 30-min feature history in RAM"},
-            {"id": "regime", "name": "Regime", "status": "off", "detail": "Not trained (needs recorded sessions)"},
+            self._regime_layer(signals),
             {"id": "cortex", "name": "Cortex", "status": "off", "detail": "ML vol/direction models not trained yet"},
             {"id": "judgement", "name": "Judgement", "status": "learning" if judging else "off",
              "detail": "EXPERIMENTAL rule engine: 7-signal confluence + trigger + gates" if judging else "Runs while recording live"},

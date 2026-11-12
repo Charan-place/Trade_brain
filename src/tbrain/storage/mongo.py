@@ -10,6 +10,7 @@ Design rules
     features   one doc per underlying per minute: price, VWAP, ATR, regime, flow, chain, clues  (_id = day|und|HH:MM)
     sessions   recorder run manifests                                                           (_id = started)
     daily      per-day summary + filter scorecard                                               (_id = day|owner)
+    mode_daily per-day modeled calls + returns for each strategy profile                        (_id = day|owner|mode)
     users      Google accounts allowed into the hosted app                                     (_id = email)
     upstox_tokens  per-user Upstox access token, encrypted (Fernet)                            (_id = email)
 """
@@ -23,7 +24,7 @@ from datetime import datetime, timezone
 
 from tbrain.timeutil import IST
 
-COLLECTIONS = ("calls", "shadows", "features", "sessions", "daily", "users", "upstox_tokens")
+COLLECTIONS = ("calls", "shadows", "features", "sessions", "daily", "mode_daily", "users", "upstox_tokens", "exec_trades")
 
 
 def clean(x):
@@ -98,6 +99,7 @@ def ensure_indexes(db) -> None:
     db.features.create_index([("day", ASCENDING), ("und", ASCENDING), ("t_ms", ASCENDING)])
     db.sessions.create_index([("day", ASCENDING)])
     db.daily.create_index([("day", DESCENDING)])
+    db.mode_daily.create_index([("owner", ASCENDING), ("mode", ASCENDING), ("day", DESCENDING)])
 
 
 def ping(db) -> bool:
@@ -162,6 +164,26 @@ def daily_doc(day: str, owner: str, summary: dict, shadow_by_blocker: dict, rule
                   "updated_at": datetime.now(timezone.utc)})
 
 
+MODE_CALL_FIELDS = ("id", "mode", "mode_version", "und", "symbol", "action", "direction", "dir", "issued_ms", "exit_ms",
+                    "entry", "exit", "last_bid", "p_sl", "p_sl_active", "p_t1", "p_t2", "outcome", "status", "r_now",
+                    "pnl_per_lot", "cost_est_per_lot", "score", "max_score", "lot", "expiry", "strike", "kind", "t1_hit",
+                    "rr_net", "risk_per_lot", "size_hint_lots")
+
+
+def mode_daily_doc(day: str, owner: str, mode: str, profile: dict, selected_mode: str | None) -> dict:
+    """Compact daily snapshot of one model profile. Values are signal-model marks, never broker fills."""
+    calls = [{k: c.get(k) for k in MODE_CALL_FIELDS} for c in profile.get("calls") or []
+             if day_of_ms(c.get("issued_ms")) == day]
+    from tbrain.signals.engine import SignalEngine
+    summary = SignalEngine.summarize(calls)
+    return clean({"_id": f"{day}|{owner}|{mode}", "day": day, "owner": owner, "mode": mode,
+                  "selected": (mode == selected_mode) if selected_mode else None,
+                  "summary": summary, "calls": calls, "rules": profile.get("rules") or {},
+                  "return_basis": profile.get("return_basis") or
+                    "signal model: entry at ask, exits marked at bid, estimated costs",
+                  "updated_at": datetime.now(timezone.utc)})
+
+
 # ---------------------------------------------------------------- live sink
 class MongoSink:
     """Fire-and-forget writer used by the live recorder. Thread-safe; never raises into the caller."""
@@ -177,6 +199,7 @@ class MongoSink:
         self.errors = 0
         self._last_minute: dict[str, int] = {}
         self._last_err_log = 0.0
+        self._bulk_ok: bool | None = None   # None = untried; False = this backend's bulk_write is unusable
         self._stop = threading.Event()
         self._t = threading.Thread(target=self._run, daemon=True, name="mongo-sink")
         self._t.start()
@@ -194,6 +217,15 @@ class MongoSink:
             self._put(coll, call["id"], call_doc(call, self.owner),
                       {"events": {"event": event, "at": datetime.now(timezone.utc)}})
         except Exception as e:  # noqa: BLE001 - storage must never break the brain
+            self._err(e)
+
+    def on_exec_event(self, book: str, event: str, trade: dict) -> None:
+        """Paper/real trade lifecycle -> `exec_trades` (one doc per book+call, with its event history)."""
+        try:
+            d = clean({k: val for k, val in trade.items() if k != "events"})
+            d.update(owner=self.owner, day=day_of_ms(trade.get("created_ms")), updated_at=datetime.now(timezone.utc))
+            self._put("exec_trades", trade["id"], d, {"events": {"event": event, "at": datetime.now(timezone.utc)}})
+        except Exception as e:  # noqa: BLE001
             self._err(e)
 
     def on_snapshot(self, snap: dict) -> None:
@@ -216,6 +248,16 @@ class MongoSink:
             d = daily_doc(day, self.owner, summary, shadow_by_blocker, rules)
             self._put("daily", d["_id"], d)
         except Exception as e:  # noqa: BLE001
+            self._err(e)
+
+    def on_mode_comparison(self, day: str, comparison: dict) -> None:
+        """Upsert one owner/day/profile snapshot for historical modeled-return lookups."""
+        try:
+            selected = comparison.get("selected")
+            for mode, profile in (comparison.get("modes") or {}).items():
+                d = mode_daily_doc(day, self.owner, mode, profile, selected)
+                self._put("mode_daily", d["_id"], d)
+        except Exception as e:  # noqa: BLE001 - mode archives must never stop recording
             self._err(e)
 
     def on_session(self, manifest: dict) -> None:
@@ -246,16 +288,61 @@ class MongoSink:
                 pushes.setdefault(key, []).append(push)
         if not batch:
             return
-        # A few docs per second at most (features 2/min, daily 1/min, call events rare): plain upserts are
-        # far below Atlas free-tier limits (100 ops/s) and behave the same on every Mongo-compatible server.
+        upds: dict[str, dict] = {}
         for key, (coll, _id, doc) in batch.items():
             doc = {k: v for k, v in doc.items() if k != "_id"}
             upd = {"$set": doc}
             if key in pushes:
                 upd["$push"] = {"events": {"$each": [p["events"] for p in pushes[key]]}}
+            upds[key] = upd
+        if self._bulk_ok is not False:
+            try:
+                self._flush_bulk(batch, upds)
+                self._bulk_ok = True
+                return
+            except TypeError:  # the backend's bulk_write doesn't accept pymongo's current WriteModel shape
+                # (seen with mongomock lagging a pymongo release) - fall back for the rest of this sink's life.
+                self._bulk_ok = False
+        self._flush_per_doc(batch, upds)
+
+    def _flush_bulk(self, batch: dict, upds: dict) -> None:
+        from pymongo import UpdateOne
+        from pymongo.errors import BulkWriteError
+
+        by_coll: dict[str, list] = {}
+        for key, (coll, _id, doc) in batch.items():
+            by_coll.setdefault(coll, []).append((key, UpdateOne({"_id": _id}, upds[key], upsert=True)))
+        for coll, pairs in by_coll.items():
+            ops = [op for _, op in pairs]
             for attempt in range(3):
                 try:
-                    self.db[coll].update_one({"_id": _id}, upd, upsert=True)
+                    res = self.db[coll].bulk_write(ops, ordered=False)
+                    self.written += res.upserted_count + res.modified_count
+                    break
+                except BulkWriteError as e:  # noqa: BLE001 - unordered: successes stick, only failed ops retry
+                    failed_idx = {w["index"] for w in e.details.get("writeErrors", [])}
+                    self.written += len(ops) - len(failed_idx)
+                    ops = [op for i, op in enumerate(ops) if i in failed_idx]
+                    if attempt == 2 or not ops:
+                        self.dropped += len(ops)
+                        if ops:
+                            self._err(e)
+                        break
+                    time.sleep(1.5 * (attempt + 1))
+                except TypeError:
+                    raise  # let flush() fall back for the whole batch, not just this collection
+                except Exception as e:  # noqa: BLE001 - connection-level failure: whole batch retries
+                    if attempt == 2:
+                        self.dropped += len(ops)
+                        self._err(e)
+                    else:
+                        time.sleep(1.5 * (attempt + 1))
+
+    def _flush_per_doc(self, batch: dict, upds: dict) -> None:
+        for key, (coll, _id, doc) in batch.items():
+            for attempt in range(3):
+                try:
+                    self.db[coll].update_one({"_id": _id}, upds[key], upsert=True)
                     self.written += 1
                     break
                 except Exception as e:  # noqa: BLE001

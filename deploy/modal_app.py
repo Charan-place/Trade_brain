@@ -1,4 +1,4 @@
-"""Trade Brain on Modal (https://modal.com) - signal-only, never places orders.
+"""Trade Brain on Modal (https://modal.com) - compares strategy modes; owner-only optional broker execution.
 
 Deploy:   modal deploy deploy/modal_app.py
 Run now:  modal run deploy/modal_app.py::record_day        (manual start, e.g. after a crash)

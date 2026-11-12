@@ -3,7 +3,7 @@
 Per index, every brain tick:
   * BREAKOUT playbook (can issue live calls): 7 clues (1 pt each) + trigger (1-min close breaks the 10-min high/low)
     + MUST filters (VWAP side, 60-min trend) + gates (window, cooldown, open call, regime*, loss pause*,
-    afternoon cutoff (13:00, dashboard switch), drawdown stop (today's closed R gives back 2R from a +2R peak)).
+    afternoon cutoff (12:00, dashboard switch), drawdown stop (today's closed R gives back 2R from a +2R peak)).
   * RANGE-FADE playbook (shadow-only until evidence): in a range regime, a rejection candle at the 60-min extreme,
     target = VWAP.
   * SHADOW CALLS: any candidate that is blocked (by a filter, gate or build check) is tracked silently to its outcome,
@@ -21,6 +21,7 @@ from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 
 from tbrain.analytics.black76 import price as b76
+from tbrain.signals.event_calendar import is_event_blackout
 from tbrain.timeutil import IST
 
 LABEL = "EXPERIMENTAL · rule-based, not yet validated"
@@ -36,7 +37,7 @@ class EngineConfig:
     min_rr_net: float = 1.5
     max_spread_pct: float = 2.0
     min_depth_lots: int = 2
-    cost_per_lot_inr: float = 40.0  # PLACEHOLDER: ~2 x Rs20 brokerage; statutory charges (STT etc.) NOT included
+    cost_per_lot_inr: float | None = None  # None = use real_cost_per_lot() below; set a number to override/test
     risk_per_trade_inr: float = 0.0
     time_stop_min: int = 30
     cooldown_min: int = 10
@@ -45,6 +46,7 @@ class EngineConfig:
     square_off: dtime = dtime(15, 20)
     expiry_cutoff: dtime = dtime(13, 30)
     max_feed_age_s: float = 3.0
+    max_quote_age_s: float = 3.0
     warmup_bars: int = 15
     horizon_min: int = 15
     big_window_s: int = 300
@@ -61,19 +63,83 @@ class EngineConfig:
     trend_er: float = 0.25            # efficiency ratio over 60 min at/above which the market is trending
     range_er: float = 0.15            # ... below which it is ranging
     range_crosses: int = 4            # VWAP crossings in 60 min that also mark a range
-    # ---- v2.2 session rules (4 live days 19-23 Oct: calls after 13:00 = 20 calls, 4 wins, -11.8R) ----
-    afternoon_cutoff: dtime | None = dtime(13, 0)   # no NEW calls after this unless allow_afternoon (UI switch)
+    regime_confirm_bars: int = 3      # regime_gate needs this many CONSECUTIVE 1-min bars reading 'trend',
+                                       # not just the current one (ADX/ER-style regime labels lag and flicker
+                                       # right at the trend/range boundary; a single noisy reading shouldn't open
+                                       # or close the gate)
+    event_calendar_gate: bool = False  # block NEW calls around known scheduled events (RBI MPC/Budget/FOMC reaction)
+    # ---- v2.2 session rules (9 live days 19 Oct-30 Oct: 12:00-13:59 = -9,316, 14:00+ = -7,924 pnl/lot) ----
+    afternoon_cutoff: dtime | None = dtime(12, 0)   # no NEW calls after this unless allow_afternoon (UI switch)
     allow_afternoon: bool = False
     dd_stop: bool = True              # stop new calls once today's realized R falls dd_giveback_r from a peak >= dd_peak_r
     dd_peak_r: float = 2.0
     dd_giveback_r: float = 2.0
+    correlation_block: bool = False   # block (not just flag) a same-direction call when the other index already has one open
+    t1_direction_check: bool = False  # while in profit: exit now instead of riding if order flow or trend/VWAP flip
+    direction_check_interval_min: int = 5   # slow layer (trend/VWAP/candles): re-run at most once every N minutes
+    fast_check_window_s: int = 60           # fast layer (CVD/price momentum): lookback window, runs every tick
+    direction_check_min_hold_s: int = 120    # don't even look until the call has been open this long
+    direction_check_min_r: float = 0.3      # ...and is up at least this many R (noise filter, not "any profit")
+    direction_check_fast_confirms: int = 2  # fast layer must read "against" this many ticks IN A ROW to close
+    direction_check_fast_min_move: float = 2.0  # futures must move at least this many points against us (not just <0)
+    # ---- v2.3 volatility regime filter (10:xx vs 11:xx split, 19 Oct-4 Nov: 10:xx payoff ratio 1.13 vs 11:xx 1.86,
+    # driven by a wider avg SL (34.9 vs 23.7 pts) across those 11 days; NOT a within-day "open decays" pattern --
+    # the 2026-10-19 replay showed that day's ATR peaked AT the open, so a fixed opening-window baseline never
+    # fired. Compares current ATR to a trailing SAME-DAY median instead, catching a spike whenever it happens) ----
+    vol_regime_filter: bool = False   # when current ATR is a spike vs the day's trailing median ATR: tighten stop + raise bar
+    vol_spike_k: float = 1.3          # current atr_1m / trailing median ATR >= this -> "spiking"
+    vol_spike_sl_floor_mult: float = 0.6   # breakout SL floor in spike regime (vs the normal 0.8 x ATR)
+    vol_spike_min_score_bonus: int = 1     # extra clue required (on top of min_score) while the regime is spiking
     # ---- shadows ----
     shadows: bool = True
     range_fade_shadow: bool = True
+    mode_id: str = "balanced"
 
 
 def _fmt(x: float | None, d: int = 2) -> str:
     return "—" if x is None else f"{x:,.{d}f}"
+
+
+# 2026 NSE/BSE index-options round-trip charges (buy to open, sell to close), per lot. All ad-valorem rates are
+# on PREMIUM turnover (entry_px + exit_px) x lot, not notional - these are the actual numbers the earlier flat
+# cost_per_lot_inr=40 placeholder didn't include (its own comment admitted as much).
+BROKERAGE_PER_ORDER_INR = 20.0       # flat, most discount brokers; 2 orders (buy + sell) per round trip
+STT_SELL_PREMIUM_RATE = 0.00125      # STT on options premium, charged on the SELL leg only (2026 rate: 0.125%)
+EXCH_TXN_RATE = 0.0003503            # NSE/BSE transaction charges, both legs, on premium turnover
+SEBI_FEE_RATE = 0.0000010            # negligible but real
+STAMP_DUTY_BUY_RATE = 0.00003        # stamp duty, BUY leg only, on premium turnover
+GST_RATE = 0.18                      # on (brokerage + exchange txn charges), not on STT/stamp duty
+
+
+def real_cost_per_lot(entry_px: float, exit_px: float, lot: int) -> float:
+    """Real round-trip cost per lot for one NSE/BSE index option trade, given an (unknown at entry time)
+    estimated exit price. Used instead of a flat placeholder so min_rr_net reflects actual, not guessed, cost."""
+    buy_turnover = entry_px * lot
+    sell_turnover = exit_px * lot
+    brokerage = 2 * BROKERAGE_PER_ORDER_INR
+    stt = sell_turnover * STT_SELL_PREMIUM_RATE
+    exch = (buy_turnover + sell_turnover) * EXCH_TXN_RATE
+    sebi = (buy_turnover + sell_turnover) * SEBI_FEE_RATE
+    stamp = buy_turnover * STAMP_DUTY_BUY_RATE
+    gst = (brokerage + exch) * GST_RATE
+    return brokerage + stt + exch + sebi + stamp + gst
+
+
+def _baseline_atr(all_bars: list, exclude_last: int = 5) -> float | None:
+    """Trailing same-day MEDIAN true range, excluding the most recent `exclude_last` bars (so a live spike
+    doesn't inflate its own baseline). Median, not mean, so one earlier spike doesn't mask a new one.
+    A fixed opening window (e.g. first 30 min) assumes volatility always decays after the open; that's false
+    on days where the open IS the day's calmest stretch and a later window spikes instead (confirmed on the
+    2026-10-19 replay: the open had the day's highest ATR, so an opening-relative ratio never exceeded 1.0)."""
+    hist = all_bars[:-exclude_last] if len(all_bars) > exclude_last else []
+    if len(hist) < 15:
+        return None
+    trs = [max(b[2] - b[3], abs(b[2] - p[4]), abs(b[3] - p[4])) for p, b in zip(hist[:-1], hist[1:])]
+    if not trs:
+        return None
+    trs.sort()
+    n = len(trs)
+    return trs[n // 2] if n % 2 else 0.5 * (trs[n // 2 - 1] + trs[n // 2])
 
 
 def regime_of(bars: list, atr: float | None, vwap_crosses: int | None, cfg: EngineConfig) -> dict:
@@ -115,7 +181,10 @@ class SignalEngine:
         self._last_issue_ms: dict[str, float] = {}
         self._issued_bar: dict[str, int] = {}
         self._shadow_bar: dict[tuple, int] = {}
+        self._regime_streak: dict[str, int] = {}   # consecutive bars reading 'trend', per underlying
+        self._regime_bar: dict[str, int] = {}      # last bar_id the streak was advanced on, per underlying (dedup)
         self.on_event = None  # optional hook (event, call) -> None, e.g. MongoSink.on_call_event; must not raise
+        self.on_step = None   # optional hook (now_ms, ctxs) -> None, e.g. ExecutionHub.on_step
         self._load()
 
     # ------------------------------------------------------------ persistence
@@ -154,10 +223,15 @@ class SignalEngine:
 
     # ------------------------------------------------------------ main step
     def step(self, now_ms: float, ctxs: dict[str, dict], tracker) -> dict:
+        if self.on_step is not None:     # execution (paper/real books) sees the same quotes first
+            try:
+                self.on_step(now_ms, ctxs)
+            except Exception as e:  # noqa: BLE001 - execution problems must never stop signals
+                self.log(f"[exec] step failed: {e!r}")
         for book in (self.calls, self.shadows):
             for c in list(book.values()):
                 if c["status"] in ("open", "t1"):
-                    self._track(c, ctxs.get(c["und"]), now_ms)
+                    self._track(c, ctxs.get(c["und"]), now_ms, tracker)
         for und, ctx in ctxs.items():
             try:
                 self.diag[und] = self._evaluate(und, ctx, tracker, now_ms)
@@ -193,6 +267,10 @@ class SignalEngine:
                 gates.append(f"paused {cfg.loss_pause_min} min after {cfg.loss_pause_n} stop-losses in a row")
         if cfg.afternoon_cutoff is not None and not cfg.allow_afternoon and now.time() >= cfg.afternoon_cutoff:
             gates.append(f"afternoon calls are off after {cfg.afternoon_cutoff:%H:%M} (switch on the dashboard)")
+        if cfg.event_calendar_gate:
+            blackout = is_event_blackout(now.date(), now.time())
+            if blackout:
+                gates.append(f"event calendar: {blackout}")
         if cfg.dd_stop:
             peak, cum = self.realized_path(now_ms)
             if peak >= cfg.dd_peak_r and peak - cum >= cfg.dd_giveback_r:
@@ -218,8 +296,20 @@ class SignalEngine:
         last_close = bars[-1][4] if bars else None
         crosses = tr.crossings(und, "vwap_dev", 3600, eps=0.1 * atr if atr else 0.0) if hasattr(tr, "crossings") else None
         regime = regime_of(all_bars, atr, crosses, cfg)
-        if cfg.regime_gate and regime["label"] != "trend":
-            gates.append(f"regime gate: market is '{regime['label']}' (breakouts only in trend)")
+        cur_bar_id = int(bars[-1][0]) if bars else None
+        if cur_bar_id is not None and self._regime_bar.get(und) != cur_bar_id:
+            self._regime_bar[und] = cur_bar_id
+            self._regime_streak[und] = self._regime_streak.get(und, 0) + 1 if regime["label"] == "trend" else 0
+        regime_streak = self._regime_streak.get(und, 0)
+        regime_confirmed_trend = regime_streak >= cfg.regime_confirm_bars
+        if cfg.regime_gate and not regime_confirmed_trend:
+            gates.append(f"regime gate: market is '{regime['label']}' ({regime_streak}/{cfg.regime_confirm_bars} "
+                         f"trend bars confirmed; breakouts only once trend is confirmed)")
+
+        baseline_atr = _baseline_atr(all_bars)
+        vol_ratio = atr / baseline_atr if (atr and baseline_atr) else None
+        vol_spiking = cfg.vol_regime_filter and vol_ratio is not None and vol_ratio >= cfg.vol_spike_k
+        min_score_needed = cfg.min_score + (cfg.vol_spike_min_score_bonus if vol_spiking else 0)
 
         sides = {}
         for d, name in ((1, "bullish"), (-1, "bearish")):
@@ -267,19 +357,22 @@ class SignalEngine:
                            "required": required, "required_ok": all(r["ok"] for r in required)}
 
         out = {"evaluated_at": now.isoformat(), "gates": gates, "sides": sides, "min_score": cfg.min_score,
-               "atr_1m": atr, "hh10": hh, "ll10": ll, "blocked": None, "regime": regime}
+               "atr_1m": atr, "hh10": hh, "ll10": ll, "blocked": None, "regime": regime,
+               "regime_streak": regime_streak, "regime_confirmed_trend": regime_confirmed_trend,
+               "vol_ratio": vol_ratio, "vol_spiking": vol_spiking, "min_score_needed": min_score_needed}
         data_blocked = any(g.startswith(DATA_GATES) for g in gates)
         if not bars or data_blocked:
             return out
-        bar_id = int(bars[-1][0])
+        bar_id = cur_bar_id
+        sl_mult = cfg.vol_spike_sl_floor_mult if vol_spiking else 0.8
 
         # ---------------- breakout playbook ----------------
-        cands = [s for s in sides.values() if s["trigger"] and s["score"] >= cfg.min_score]
+        cands = [s for s in sides.values() if s["trigger"] and s["score"] >= min_score_needed]
         if cands:
             best = max(cands, key=lambda s: (s["required_ok"], s["score"]))
             blockers = list(gates) + [r["text"].replace("MUST: ", "") for r in best["required"] if not r["ok"]]
             if not blockers and self._issued_bar.get(und) != bar_id:
-                call, why = self._build(und, ctx, best, self._breakout_levels(spot, best["dir"], atr, bars),
+                call, why = self._build(und, ctx, best, self._breakout_levels(spot, best["dir"], atr, bars, sl_mult),
                                         now, now_ms, "breakout", regime, enforce=True)
                 if call is not None:
                     self._issued_bar[und] = bar_id
@@ -292,10 +385,18 @@ class SignalEngine:
                 blockers.append(why)
             if blockers:
                 out["blocked"] = "; ".join(b for b in blockers if b)
-                self._shadow(und, ctx, best, self._breakout_levels(spot, best["dir"], atr, bars), now, now_ms,
+                self._shadow(und, ctx, best, self._breakout_levels(spot, best["dir"], atr, bars, sl_mult), now, now_ms,
                              "breakout", regime, blockers, bar_id)
-        elif any(s["trigger"] for s in sides.values()):
-            pass  # trigger without enough clues: not a candidate (keeps shadow volume meaningful)
+        else:
+            # One clue short of the bar: not a call, but tracked as a shadow so raising min_score never goes blind
+            # to what the dropped bucket would have done (17 live days: score-5 = -5,082/162 calls, score>=6 positive).
+            near = [s for s in sides.values() if s["trigger"] and s["score"] == min_score_needed - 1]
+            if near:
+                best = max(near, key=lambda s: (s["required_ok"], s["score"]))
+                blockers = ([f"score {best['score']} < {min_score_needed} (one clue short)"] + list(gates)
+                            + [r["text"].replace("MUST: ", "") for r in best["required"] if not r["ok"]])
+                self._shadow(und, ctx, best, self._breakout_levels(spot, best["dir"], atr, bars, sl_mult), now, now_ms,
+                             "breakout", regime, blockers, bar_id)
 
         # ---------------- range-fade playbook (shadow-only) ----------------
         if cfg.range_fade_shadow and regime["label"] == "range" and atr and len(bars) >= 30:
@@ -321,14 +422,14 @@ class SignalEngine:
         return out
 
     @staticmethod
-    def _breakout_levels(spot, d, atr, bars):
+    def _breakout_levels(spot, d, atr, bars, sl_floor_mult=0.8):
         if not spot or not atr or len(bars) < 5:
             return (None, None, None, "no spot/ATR")
         recent = bars[-5:]
         sl_u = (min(b[3] for b in recent) - 0.1 * atr) if d > 0 else (max(b[2] for b in recent) + 0.1 * atr)
         risk_u = abs(spot - sl_u)
-        if risk_u < 0.8 * atr:
-            sl_u, risk_u = spot - d * 0.8 * atr, 0.8 * atr
+        if risk_u < sl_floor_mult * atr:
+            sl_u, risk_u = spot - d * sl_floor_mult * atr, sl_floor_mult * atr
         if risk_u > 3 * atr:
             return (None, None, None, f"stop too wide ({risk_u:.1f} pts > 3x ATR)")
         return (sl_u, spot + d * 2.0 * risk_u, spot + d * 3.0 * risk_u, None)
@@ -383,6 +484,10 @@ class SignalEngine:
         if not leg:
             return None, "ATM leg missing"
         q = (ctx.get("quotes") or {}).get(leg["key"], {})
+        quote_recv_ns = q.get("recv_ns")
+        quote_age_s = (now_ms - quote_recv_ns / 1e6) / 1000 if quote_recv_ns else None
+        if quote_recv_ns is not None and (quote_age_s < 0 or quote_age_s > cfg.max_quote_age_s):
+            return None, f"option quote stale or unavailable (> {cfg.max_quote_age_s:.0f}s)"
         bid, ask = q.get("bp1"), q.get("ap1")
         if not bid or not ask or ask < bid:
             return None, "no two-sided quote on the ATM leg"
@@ -406,8 +511,10 @@ class SignalEngine:
         entry = ask
         if not (p_sl < entry < p_t1 < p_t2):
             return None, "premium levels not ordered after time decay (move too small for this option)"
-        risk_lot = (entry - p_sl) * lot + cfg.cost_per_lot_inr
-        reward_lot = (p_t1 - entry) * lot - cfg.cost_per_lot_inr
+        cost_sl = cfg.cost_per_lot_inr if cfg.cost_per_lot_inr is not None else real_cost_per_lot(entry, p_sl, lot)
+        cost_t1 = cfg.cost_per_lot_inr if cfg.cost_per_lot_inr is not None else real_cost_per_lot(entry, p_t1, lot)
+        risk_lot = (entry - p_sl) * lot + cost_sl
+        reward_lot = (p_t1 - entry) * lot - cost_t1
         rr = reward_lot / risk_lot if risk_lot > 0 else 0
         if enforce and rr < cfg.min_rr_net:
             return None, f"net R:R {rr:.2f} < {cfg.min_rr_net} after est. costs"
@@ -425,8 +532,11 @@ class SignalEngine:
                 break
         correlated = [c["symbol"] for c in self.calls.values()
                       if c["und"] != und and c["status"] in ("open", "t1") and c["dir"] == d]
+        if enforce and cfg.correlation_block and correlated:
+            return None, f"same-direction call already open on {correlated[0]} (correlation block)"
         return {
-            "id": uuid.uuid4().hex[:10], "und": und, "dir": d, "direction": "bullish" if d > 0 else "bearish",
+            "id": f"{cfg.mode_id}-{uuid.uuid4().hex[:10]}", "mode": cfg.mode_id, "mode_version": 1,
+            "und": und, "dir": d, "direction": "bullish" if d > 0 else "bearish",
             "action": f"BUY {kind}", "instrument_key": leg["key"], "kind": kind, "strike": K, "expiry": ch.get("expiry"),
             "symbol": f"{und} {K:.0f} {kind} {ch.get('expiry')}", "lot": lot, "issued_ms": now_ms,
             "issued_at": now.isoformat(), "score": side["score"], "max_score": side["max"], "trigger": side["trigger"],
@@ -436,19 +546,80 @@ class SignalEngine:
             "u_entry": spot, "u_sl": sl_u, "u_sl_active": sl_u, "u_t1": t1_u, "u_t2": t2_u, "p_sl_active": p_sl,
             "entry": entry, "entry_zone": [round(mid, 2), round(ask * 1.005, 2)], "p_sl": p_sl, "p_t1": p_t1, "p_t2": p_t2,
             "iv_at_entry": iv, "spread_pct": spr, "risk_per_lot": risk_lot, "reward_t1_per_lot": reward_lot, "rr_net": rr,
-            "cost_est_per_lot": cfg.cost_per_lot_inr, "size_hint_lots": lots, "time_stop_ms": stop_at.timestamp() * 1000,
+            "cost_override": cfg.cost_per_lot_inr, "size_hint_lots": lots, "time_stop_ms": stop_at.timestamp() * 1000,
             "status": "open", "t1_hit": False, "outcome": None, "exit": None, "exit_ms": None,
-            "last_bid": bid, "pnl_per_lot": -cfg.cost_per_lot_inr, "r_now": 0.0, "mfe": 0.0, "mae": 0.0,
+            "last_bid": bid,
+            "cost_est_per_lot": (cfg.cost_per_lot_inr if cfg.cost_per_lot_inr is not None
+                                  else real_cost_per_lot(entry, entry, lot)),
+            "pnl_per_lot": -(cfg.cost_per_lot_inr if cfg.cost_per_lot_inr is not None
+                             else real_cost_per_lot(entry, entry, lot)),
+            "r_now": 0.0, "mfe": 0.0, "mae": 0.0,
         }, None
 
+    # ------------------------------------------------------------ direction re-check (while in profit)
+    def _direction_favorable_slow(self, c: dict, ctx: dict) -> dict:
+        """Slow layer (re-run every `direction_check_interval_min`): same MUST filters as entry.
+          * futures still on our side of VWAP.
+          * 60-min trend still >= trend_k x ATR.
+          * tighter: of the last 2 COMPLETED 1-min candles, at least 1 must still close with our direction.
+        This reacts to a sustained reversal, not a single print - too slow on its own for options that can
+        swing on one block trade, hence the fast layer below.
+        """
+        cfg, d = self.cfg, c["dir"]
+        fut, vwap = ctx.get("fut"), ctx.get("vwap")
+        vwap_ok = fut is None or vwap is None or d * (fut - vwap) > 0
+        bars = (ctx.get("bars") or [])[-cfg.trend_bars:]
+        trend_ok = True
+        if cfg.trend_k is not None and len(bars) >= 15:
+            trs = [max(b[2] - b[3], abs(b[2] - p[4]), abs(b[3] - p[4])) for p, b in zip(bars[:-1], bars[1:])]
+            atr = sum(trs) / len(trs) if trs else None
+            move = bars[-1][4] - bars[0][4]
+            need = cfg.trend_k * atr if atr else None
+            trend_ok = need is None or d * move >= need
+        last2 = bars[-2:]
+        tighter_ok = not last2 or any(d * (b[4] - b[1]) > 0 for b in last2)
+        favorable = vwap_ok and trend_ok and tighter_ok
+        return {"favorable": favorable, "vwap_ok": vwap_ok, "trend_ok": trend_ok, "tighter_ok": tighter_ok}
+
+    def _direction_favorable_fast(self, c: dict, ctx: dict, tr) -> dict:
+        """Fast layer (every tick while in profit, once past the min-hold/min-R gate): tick-level order flow
+        (CVD + futures price over a short window), same idea as the entry 'aggression' clue but short enough to
+        catch a reversal before it shows up in a completed 1-min candle. A HARD flip only: the futures move must
+        exceed `direction_check_fast_min_move` points against us, and CVD must also be negative - a flat/near-zero
+        reading (normal noise inside a trend) does not count as 'against'.
+        """
+        cfg, d, und = self.cfg, c["dir"], c["und"]
+        cvd_fast = tr.delta(und, "cvd", cfg.fast_check_window_s)
+        px_fast = tr.delta(und, "fut", cfg.fast_check_window_s)
+        cvd_ok = cvd_fast is None or d * cvd_fast >= 0
+        px_ok = px_fast is None or d * px_fast >= -cfg.direction_check_fast_min_move
+        favorable = cvd_ok or px_ok   # only "against" when BOTH a real price move AND CVD have flipped
+        return {"favorable": favorable, "cvd_ok": cvd_ok, "px_ok": px_ok}
+
+    def _direction_favorable(self, c: dict, ctx: dict, tr, now_ms: float, run_slow: bool) -> dict:
+        fast = self._direction_favorable_fast(c, ctx, tr)
+        slow = c.get("t1_check_slow", {"favorable": True}) if not run_slow else self._direction_favorable_slow(c, ctx)
+        if run_slow:
+            c["t1_check_slow"] = slow
+        fast_streak = c.get("fast_against_streak", 0) + 1 if not fast["favorable"] else 0
+        c["fast_against_streak"] = fast_streak
+        fast_confirmed_against = fast_streak >= self.cfg.direction_check_fast_confirms
+        return {"favorable": not fast_confirmed_against and slow["favorable"], "fast": fast, "slow": slow,
+                "fast_streak": fast_streak}
+
     # ------------------------------------------------------------ tracking
-    def _track(self, c: dict, ctx: dict | None, now_ms: float) -> None:
+    def _track(self, c: dict, ctx: dict | None, now_ms: float, tr=None) -> None:
         q = ((ctx or {}).get("quotes") or {}).get(c["instrument_key"], {})
+        recv_ns = q.get("recv_ns")
+        quote_age_s = (now_ms - recv_ns / 1e6) / 1000 if recv_ns else None
+        quote_fresh = recv_ns is None or 0 <= quote_age_s <= self.cfg.max_quote_age_s
         u = (ctx or {}).get("spot")
-        bid = q.get("bp1") or q.get("ltp")
+        bid = (q.get("bp1") or q.get("ltp")) if quote_fresh else None
         if bid:
             c["last_bid"] = bid
-            pnl = (bid - c["entry"]) * c["lot"] - c["cost_est_per_lot"]
+            cost = c["cost_override"] if c.get("cost_override") is not None else real_cost_per_lot(c["entry"], bid, c["lot"])
+            c["cost_est_per_lot"] = cost
+            pnl = (bid - c["entry"]) * c["lot"] - cost
             c["pnl_per_lot"] = pnl
             c["r_now"] = pnl / c["risk_per_lot"] if c["risk_per_lot"] else 0.0
             c["mfe"] = max(c["mfe"], pnl)
@@ -456,14 +627,30 @@ class SignalEngine:
         c["u_last"] = u
         d = c["dir"]
         psl = c.get("p_sl_active", c.get("p_sl"))
-        ltp = q.get("ltp") or bid
-        if self.cfg.premium_stop and psl and bid and bid <= psl and ltp and ltp <= psl:
+        ltp = (q.get("ltp") or bid) if quote_fresh else None
+        if c["t1_hit"] and bid and ltp and bid <= c["entry"] and ltp <= c["entry"]:
+            c["stop_via"] = "premium_breakeven"
+            return self._close(c, "T1_STOP", now_ms)
+        if self.cfg.premium_stop and not c["t1_hit"] and psl and bid and bid <= psl and ltp and ltp <= psl:
             c["stop_via"] = "premium"
             return self._close(c, "BREAKEVEN" if c["t1_hit"] else "SL", now_ms)
         if u is not None:
             if (d > 0 and u <= c["u_sl_active"]) or (d < 0 and u >= c["u_sl_active"]):
                 c["stop_via"] = "index"
-                return self._close(c, "BREAKEVEN" if c["t1_hit"] else "SL", now_ms)
+                return self._close(c, "T1_STOP" if c["t1_hit"] else "SL", now_ms)
+            cfg = self.cfg
+            held_long_enough = now_ms - c["issued_ms"] >= cfg.direction_check_min_hold_s * 1000
+            up_enough = c["risk_per_lot"] > 0 and c["r_now"] >= cfg.direction_check_min_r
+            if held_long_enough and up_enough and ctx and tr is not None:
+                interval_ms = cfg.direction_check_interval_min * 60_000
+                run_slow = now_ms - c.get("last_dir_check_ms", c["issued_ms"]) >= interval_ms
+                if run_slow:
+                    c["last_dir_check_ms"] = now_ms
+                check = self._direction_favorable(c, ctx, tr, now_ms, run_slow)
+                c["t1_check"] = check
+                if cfg.t1_direction_check and not check["favorable"]:
+                    c["stop_via"] = "direction_check"
+                    return self._close(c, "EARLY_EXIT", now_ms)
             if not c["t1_hit"] and ((d > 0 and u >= c["u_t1"]) or (d < 0 and u <= c["u_t1"])):
                 c["t1_hit"], c["status"], c["t1_ms"], c["t1_bid"] = True, "t1", now_ms, c.get("last_bid")
                 c["u_sl_active"] = c["u_entry"]
@@ -491,7 +678,8 @@ class SignalEngine:
             return {"calls": len(self.calls), "closed": 0, "hit_t1": None, "avg_r": None, "total_pnl_per_lot": None}
         return {"calls": len(self.calls), "closed": n, "hit_t1": sum(c["t1_hit"] for c in closed) / n,
                 "avg_r": sum(c["r_now"] for c in closed) / n, "total_pnl_per_lot": sum(c["pnl_per_lot"] for c in closed),
-                "by_outcome": {o: sum(1 for c in closed if c["outcome"] == o) for o in ("T2", "BREAKEVEN", "SL", "TIME")}}
+                "by_outcome": {o: sum(1 for c in closed if c["outcome"] == o)
+                               for o in ("T2", "T1_STOP", "BREAKEVEN", "SL", "TIME", "EARLY_EXIT")}}
 
     def realized_path(self, now_ms: float) -> tuple[float, float]:
         """(peak, current) cumulative R of today's REAL calls that had closed by now_ms, in exit order."""
@@ -505,7 +693,8 @@ class SignalEngine:
             peak = max(peak, cum)
         return peak, cum
 
-    RUNTIME_KEYS = ("allow_afternoon", "dd_stop")
+    RUNTIME_KEYS = ("allow_afternoon", "dd_stop", "t1_direction_check", "vol_regime_filter", "regime_gate",
+                    "event_calendar_gate")
 
     def apply_settings(self, settings: dict | None) -> dict:
         """Runtime switches from the dashboard (only whitelisted booleans). Returns what changed."""
@@ -546,8 +735,9 @@ class SignalEngine:
         for k, label in (("trend", "trend filter"), ("vwap", "VWAP filter"), ("cooldown", "cooldown"),
                          ("already open", "one open per index"), ("wall", "OI wall"), ("r:r", "R:R"), ("spread", "spread"),
                          ("thin offer", "depth"), ("regime", "regime gate"), ("paused", "loss pause"),
-                         ("shadow-only", "range-fade (shadow)"), ("premium levels", "levels"), ("stop too wide", "stop too wide"),
-                         ("afternoon", "afternoon cutoff"), ("drawdown stop", "drawdown stop")):
+                         ("shadow-only", "range-fade (shadow)"), ("levels", "levels"), ("stop too wide", "stop too wide"),
+                         ("afternoon", "afternoon cutoff"), ("drawdown stop", "drawdown stop"),
+                         ("event calendar", "event calendar"), ("clue short", "score threshold")):
             if k in t:
                 return label
         return "other"
@@ -577,9 +767,13 @@ class SignalEngine:
                 "diagnostics": self.diag, "scoreboard": self.scoreboard(),
                 "rules": {"min_score": self.cfg.min_score, "t1_r": self.cfg.t1_r, "t2_r": self.cfg.t2_r,
                           "require_vwap": self.cfg.require_vwap, "trend_k": self.cfg.trend_k,
-                          "regime_gate": self.cfg.regime_gate, "loss_pause_n": self.cfg.loss_pause_n,
+                          "loss_pause_n": self.cfg.loss_pause_n,
                           "premium_stop": self.cfg.premium_stop, "min_rr_net": self.cfg.min_rr_net,
                           "time_stop_min": self.cfg.time_stop_min, "cost_per_lot_inr": self.cfg.cost_per_lot_inr,
                           "afternoon_cutoff": self.cfg.afternoon_cutoff.strftime("%H:%M") if self.cfg.afternoon_cutoff else None,
                           "allow_afternoon": self.cfg.allow_afternoon, "dd_stop": self.cfg.dd_stop,
-                          "dd_peak_r": self.cfg.dd_peak_r, "dd_giveback_r": self.cfg.dd_giveback_r}}
+                          "dd_peak_r": self.cfg.dd_peak_r, "dd_giveback_r": self.cfg.dd_giveback_r,
+                          "t1_direction_check": self.cfg.t1_direction_check,
+                          "vol_regime_filter": self.cfg.vol_regime_filter, "vol_spike_k": self.cfg.vol_spike_k,
+                          "regime_gate": self.cfg.regime_gate, "regime_confirm_bars": self.cfg.regime_confirm_bars,
+                          "event_calendar_gate": self.cfg.event_calendar_gate}}
