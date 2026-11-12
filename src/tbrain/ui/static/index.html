@@ -364,8 +364,8 @@ footer{padding-top:12px;border-top:1px solid var(--grid)}
     <select id="expiry" aria-label="Expiry"></select>
     <select id="mode-picker" title="Sets every switch below at once. These are TRADE-OFFS, not a guarantee of more profit: Conservative trades less often but only in clearer conditions; Aggressive trades more often, including conditions the data shows are historically weaker.">
       <option value="">— choose a mode —</option>
-      <option value="conservative">🐢 Conservative: only 6-of-7-clue setups (score-5 entries lost over 17 live days)</option>
-      <option value="balanced">⚖️ Balanced: today's proven default (most track record)</option>
+      <option value="conservative">🐢 Conservative: 6-of-7-clue setups + waits 20 candles after open + event-day blackout</option>
+      <option value="balanced">⚖️ Balanced: 6-of-7-clue setups, standard session rules (score-5 entries lost over 17 live days)</option>
       <option value="aggressive">🐇 Aggressive: more trade volume, more risk (not more win%)</option>
       <option value="custom">⚙️ Custom switches</option>
     </select>

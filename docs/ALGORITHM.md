@@ -266,8 +266,10 @@ With the three profiles running side by side since 6 Nov, the first honest full 
 Changes: Conservative = Balanced + `min_score 6` + `warmup_bars 20` + event calendar (`MODE_TUNING` in
 `signals/modes.py`; regime gate and vol filter removed from it). Candidates exactly one clue short of the bar are
 now **shadowed** (blocker "score N < M (one clue short)") instead of silently dropped, so raising the score bar
-never goes blind to what the dropped bucket does next. Balanced (the real-money path) is unchanged at 5 pending
-the owner's call.
+never goes blind to what the dropped bucket does next. Balanced (the real-money path) was then also raised to
+`min_score 6` on the owner's call the same day (standard 15-bar warm-up, no event calendar - that is what still
+separates it from Conservative). Aggressive stays at 5: it is explicitly the volume profile. Expect roughly a
+quarter of the previous call count on Balanced; every dropped score-5 candidate is still tracked as a shadow.
 
 ## Shadow calls (the learning loop)
 Every candidate that reaches the trigger with enough clues but is **blocked** (trend/VWAP filter, cooldown, open call,

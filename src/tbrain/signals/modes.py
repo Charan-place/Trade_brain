@@ -23,6 +23,7 @@ MODE_RULES = {
 # entries issued before a regime could be computed (< 20 bars) were all stop-losses.
 MODE_TUNING = {
     "conservative": {"min_score": 6, "warmup_bars": 20},
+    "balanced": {"min_score": 6},     # owner's call 2026-11-12: the real-money path drops the score-5 bucket too
 }
 
 

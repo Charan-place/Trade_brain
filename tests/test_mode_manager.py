@@ -35,7 +35,8 @@ def test_conservative_profile_raises_the_score_bar_and_waits_for_a_regime(tmp_pa
     modes = ModeManager(EngineConfig(), DictSettings({}), tmp_path, log=lambda *a: None)
     cons, bal = modes.engines["conservative"].cfg, modes.engines["balanced"].cfg
     assert cons.min_score == 6 and cons.warmup_bars == 20          # the two tuned fields
-    assert bal.min_score == 5 and bal.warmup_bars == 15            # balanced untouched
+    assert bal.min_score == 6 and bal.warmup_bars == 15            # balanced: same bar, standard warm-up
+    assert modes.engines["aggressive"].cfg.min_score == 5          # aggressive keeps the volume
     assert cons.regime_gate is False and cons.vol_regime_filter is False   # the 0-call combination is gone
     assert cons.event_calendar_gate is True
 
