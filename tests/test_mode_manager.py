@@ -31,6 +31,15 @@ def test_all_profiles_run_independently_and_publish_daily_comparisons(tmp_path):
     assert hub.steps == 1
 
 
+def test_conservative_profile_raises_the_score_bar_and_waits_for_a_regime(tmp_path):
+    modes = ModeManager(EngineConfig(), DictSettings({}), tmp_path, log=lambda *a: None)
+    cons, bal = modes.engines["conservative"].cfg, modes.engines["balanced"].cfg
+    assert cons.min_score == 6 and cons.warmup_bars == 20          # the two tuned fields
+    assert bal.min_score == 5 and bal.warmup_bars == 15            # balanced untouched
+    assert cons.regime_gate is False and cons.vol_regime_filter is False   # the 0-call combination is gone
+    assert cons.event_calendar_gate is True
+
+
 def test_selected_mode_changes_immediately_and_only_selected_issue_is_routed(tmp_path):
     store = DictSettings({})
     modes = ModeManager(EngineConfig(), store, tmp_path, log=lambda *a: None)

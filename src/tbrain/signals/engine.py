@@ -387,8 +387,16 @@ class SignalEngine:
                 out["blocked"] = "; ".join(b for b in blockers if b)
                 self._shadow(und, ctx, best, self._breakout_levels(spot, best["dir"], atr, bars, sl_mult), now, now_ms,
                              "breakout", regime, blockers, bar_id)
-        elif any(s["trigger"] for s in sides.values()):
-            pass  # trigger without enough clues: not a candidate (keeps shadow volume meaningful)
+        else:
+            # One clue short of the bar: not a call, but tracked as a shadow so raising min_score never goes blind
+            # to what the dropped bucket would have done (17 live days: score-5 = -5,082/162 calls, score>=6 positive).
+            near = [s for s in sides.values() if s["trigger"] and s["score"] == min_score_needed - 1]
+            if near:
+                best = max(near, key=lambda s: (s["required_ok"], s["score"]))
+                blockers = ([f"score {best['score']} < {min_score_needed} (one clue short)"] + list(gates)
+                            + [r["text"].replace("MUST: ", "") for r in best["required"] if not r["ok"]])
+                self._shadow(und, ctx, best, self._breakout_levels(spot, best["dir"], atr, bars, sl_mult), now, now_ms,
+                             "breakout", regime, blockers, bar_id)
 
         # ---------------- range-fade playbook (shadow-only) ----------------
         if cfg.range_fade_shadow and regime["label"] == "range" and atr and len(bars) >= 30:
@@ -729,7 +737,7 @@ class SignalEngine:
                          ("thin offer", "depth"), ("regime", "regime gate"), ("paused", "loss pause"),
                          ("shadow-only", "range-fade (shadow)"), ("levels", "levels"), ("stop too wide", "stop too wide"),
                          ("afternoon", "afternoon cutoff"), ("drawdown stop", "drawdown stop"),
-                         ("event calendar", "event calendar")):
+                         ("event calendar", "event calendar"), ("clue short", "score threshold")):
             if k in t:
                 return label
         return "other"

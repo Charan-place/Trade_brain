@@ -245,6 +245,30 @@ Backtested on the 2 usable days (19, 23 Oct, neither an event day): exact pnl ma
 (+5,350 / +15,963) - confirms the gate is a true no-op outside a blackout window, as intended. Its real value
 can only be measured on an actual event day, which isn't in the current backtestable tick data.
 
+## 17-day review and the Conservative profile rebuilt (2026-11-12, 223 deduped live calls, 19 Oct-12 Nov)
+With the three profiles running side by side since 6 Nov, the first honest full read:
+- **Baseline edge is ~zero**: +43 pnl/lot per call, 8 up days vs 9 down days, worst day -6,779. After real slippage
+  that is break-even. No filter combination tested makes the DAY-level result consistent - the best raise the
+  per-call average to +140..+240 but still leave roughly half the days negative. Anyone reading this as "profit
+  every day" is reading it wrong.
+- **Conservative as first shipped issued 0 calls in 4 days**: regime gate (3-bar confirm) + vol filter blocked every
+  candidate ("market is 'range'/'mixed'" x76). A profile that never trades is not a profile. Removed from it.
+- **The one robust finding is a negative one**: score-5 entries lost -5,082 over 162 calls across the whole period,
+  while score>=6 was positive (+14,590 over 61; but +15,509 of that came from just two days, 21 Oct and 6 Nov - so
+  "score 6 wins" is fragile; "score 5 loses" is the dependable half). Removing a losing bucket is far less prone
+  to overfitting than adding a winning one.
+- The 5 entries issued before a regime could be read (< 20 bars, 09:36-09:50) were all stop-losses (-7,780).
+- **Range-fade is not the answer** for choppy weeks: -7,893 over 175 shadows, 30% win. Stays shadow-only.
+- Aggressive's direction check locked +0.5R median exits (32 of them) while its stop-losses ran the full -1R:
+  62% win rate, +1,806 net. A clipped-winner / full-loser shape; the `direction_check_min_r` (0.3) is too low to
+  be a trend-reversal signal and reads mostly as noise-taking. Not changed yet - no counterfactual to measure.
+
+Changes: Conservative = Balanced + `min_score 6` + `warmup_bars 20` + event calendar (`MODE_TUNING` in
+`signals/modes.py`; regime gate and vol filter removed from it). Candidates exactly one clue short of the bar are
+now **shadowed** (blocker "score N < M (one clue short)") instead of silently dropped, so raising the score bar
+never goes blind to what the dropped bucket does next. Balanced (the real-money path) is unchanged at 5 pending
+the owner's call.
+
 ## Shadow calls (the learning loop)
 Every candidate that reaches the trigger with enough clues but is **blocked** (trend/VWAP filter, cooldown, open call,
 OI wall, R:R, spread, depth, regime gate, loss pause) is built exactly like a real call and tracked silently to its

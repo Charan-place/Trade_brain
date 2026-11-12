@@ -342,6 +342,22 @@ def test_default_cost_model_uses_real_cost_not_the_old_flat_placeholder():
     assert c["cost_est_per_lot"] > 40.0
 
 
+def test_one_clue_short_of_min_score_is_shadowed_not_dropped():
+    ctx = _ctx(); ctx["big_net"] = 0.0                       # big-players clue fails -> score 6 of 7
+    eng = SignalEngine(EngineConfig(min_score=7), store_dir=None, log=lambda *a: None)
+    blk = eng.step(NOW_MS, {"NIFTY": ctx}, _tracker())
+    assert blk["diagnostics"]["NIFTY"]["sides"]["bullish"]["score"] == 6
+    assert not blk["calls"]
+    (sh,) = eng.shadows.values()
+    assert sh["score"] == 6 and sh["playbook"] == "breakout"
+    assert "score threshold" in {SignalEngine.blocker_key(b) for b in sh["blocked_by"]}
+    # two clues short is still not tracked (keeps shadow volume meaningful)
+    ctx2 = _ctx(); ctx2["big_net"] = 0.0; ctx2["flow"] = {"obi": 0.0, "resting_imbalance": 0.0}
+    eng2 = SignalEngine(EngineConfig(min_score=7), store_dir=None, log=lambda *a: None)
+    eng2.step(NOW_MS, {"NIFTY": ctx2}, _tracker())
+    assert not eng2.shadows
+
+
 def test_regime_gate_switch():
     eng = SignalEngine(EngineConfig(regime_gate=True), store_dir=None, log=lambda *a: None)
     blk = eng.step(NOW_MS, {"NIFTY": _ctx()}, _tracker())   # fixture bars are a gentle drift -> not 'trend'

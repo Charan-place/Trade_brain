@@ -10,11 +10,19 @@ from tbrain.timeutil import IST, now_ist
 
 MODE_RULES = {
     "conservative": {"allow_afternoon": False, "dd_stop": True, "t1_direction_check": False,
-                     "vol_regime_filter": True, "regime_gate": True, "event_calendar_gate": True},
+                     "vol_regime_filter": False, "regime_gate": False, "event_calendar_gate": True},
     "balanced": {"allow_afternoon": False, "dd_stop": True, "t1_direction_check": False,
                  "vol_regime_filter": False, "regime_gate": False, "event_calendar_gate": False},
     "aggressive": {"allow_afternoon": True, "dd_stop": True, "t1_direction_check": True,
                    "vol_regime_filter": False, "regime_gate": False, "event_calendar_gate": False},
+}
+# Non-switch tuning per profile (dashboard switches above stay booleans so settings migration/detection is unchanged).
+# Conservative as first shipped (regime gate x 3-bar confirm + vol filter) issued ZERO calls in its first 4 live days
+# (6-12 Nov): every candidate hit "regime gate: market is 'range'/'mixed'". Replaced with the one filter that is robust
+# across all 17 live days: score-5 entries lost (-5,082 over 162 deduped calls) while score>=6 made money; and the 5
+# entries issued before a regime could be computed (< 20 bars) were all stop-losses.
+MODE_TUNING = {
+    "conservative": {"min_score": 6, "warmup_bars": 20},
 }
 
 
@@ -28,7 +36,7 @@ class ModeManager:
         self.engines: dict[str, SignalEngine] = {}
         for name, rules in MODE_RULES.items():
             path = self.store_dir if name == "balanced" else self.store_dir / "modes" / name
-            self._add(name, replace(base, mode_id=name, **rules), path)
+            self._add(name, replace(base, mode_id=name, **rules, **MODE_TUNING.get(name, {})), path)
         self._settings = {}
         self.refresh_settings()
 

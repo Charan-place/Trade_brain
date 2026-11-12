@@ -128,7 +128,7 @@ def test_local_ui_settings_endpoint_with_csrf_guards(tmp_path):
         assert post(b"allow_afternoon=true", "application/x-www-form-urlencoded") == 415   # form post refused
         assert post(b'{"allow_afternoon": true}', origin="https://evil.example") == 403      # foreign site refused
         assert post(b'{"allow_afternoon": true}', origin="http://127.0.0.1:8791") == 200
-        assert st.get() == {"allow_afternoon": True}
+        assert st.get() == {"allow_afternoon": True, "mode": "custom"}   # a hand-toggled switch marks the profile custom
     finally:
         srv.stop()
 
