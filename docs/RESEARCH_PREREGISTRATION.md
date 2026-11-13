@@ -60,3 +60,23 @@ details fixed so they cannot be chosen after the fact:
   informational only and gates nothing.
 - Days with fewer than 360 session bars (half days, Muhurat, data gaps) are excluded and counted in the report.
 - The loader refuses to read FINAL-period dates unless explicitly opened.
+
+## Family 2: previous-day levels and trend (frozen 2026-11-13, before any code or result for this family exists)
+Requested by the owner: use the prior day's high, low, close and trend. Same data, same splits, same procedure, same pass rule
+as family 1 (Holm over this family on TRAIN, same sign with interval excluding zero on VALIDATE, mean >= 1.0 bp in both).
+FINAL stays sealed. One parameter value per hypothesis; no sweeps. PDH/PDL/PDC = previous loaded trading day's high, low and last close.
+Tests in this family: 7 hypotheses x 2 indices = 14. Cumulative tests across all families: 36 + 14 = 50 (reported next to every p-value).
+
+- P2 Prior-day extreme breakout, continuation: first bar t >= 09:30 (and <= 14:45) with close above PDH and previous close <= PDH
+  (fresh cross) goes long; first fresh close below PDL goes short; whichever comes first; one trade per day.
+  Entry next bar open, exit at close of min(t+30, 15:14).
+- P3 Prior-day extreme failed break, fade: first bar t in the same window with high > PDH but close < PDH goes short; low < PDL
+  but close > PDL goes long; first in time; one trade per day. Same entry/exit as P2.
+- P4 Gap fill: gap = open(09:15)/PDC - 1; if |gap| >= 0.3% trade against the gap. Entry open(09:45), exit close(12:00 bar, i.e. 11:59).
+- P5a Prior-day trend: sign of PDC / (the close before it) - 1 predicts today. Entry open(09:45), exit close(15:14).
+- P5b Five-day trend: sign of PDC / (close 5 trading days before PDC) - 1 predicts today. Same entry/exit.
+- P6 Prior-day close location: CLV = (PDC - PDL) / (PDH - PDL). CLV >= 0.8 goes long, <= 0.2 goes short, else no trade.
+  Same entry/exit as P5a.
+- P7 Trend-aligned prior-day breakout: P2 only when the five-day trend sign agrees with the break direction.
+The first loaded day of each split has no prior day and is skipped. Direction p-values and intervals as in family 1.
+Expected honest outcome stated in advance: the hurdle is 1.0 bp, so a small statistically significant effect is still reported as "no net edge".
