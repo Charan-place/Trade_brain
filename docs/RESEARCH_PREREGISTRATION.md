@@ -108,3 +108,10 @@ Passing Gate A permits live trading at ONE lot with a hard daily loss cap; it do
 **Amendment to family 3, 2026-11-13 (no forward day has been recorded yet, so no result exists):** the `volatility` clue is set on both
 the bullish and bearish side at the same time, so it carries no direction and cannot be tested as long or short. It is dropped.
 Family 3 is 6 clues x 2 indices = 12 tests (cumulative tests across all families: 36 + 14 + 12 = 62).
+
+## Gate A start record (2026-11-13, 23:47 IST)
+Deployed build: Modal app `trade-brain` v24, commit ae4ca29 (real-cost model with STT 0.15%, score-6 Balanced and Conservative profiles,
+recorder preemption fix). Gate A clock starts on the first trading day after deploy: **2026-11-16**. The PRIMARY profile, chosen now so
+the three profiles cannot be cherry-picked afterwards, is **balanced** (it drives the real-money path). Conservative and aggressive are
+reported for information only and cannot open real money by passing. Any change to engine or profile settings restarts the clock.
+Earliest first verdict: 30 trading days after 2026-11-16 (about 2026-12-30). Family 3 forward days also start 2026-11-16.
