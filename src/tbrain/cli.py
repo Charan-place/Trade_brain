@@ -147,6 +147,22 @@ def cmd_backtest(s: Settings, a) -> int:
     return 0
 
 
+def cmd_history(s: Settings, a) -> int:
+    from datetime import date
+    from tbrain.brokers.upstox import auth
+    from tbrain.research.history import pull_index
+    token = auth.get_token(s)
+    if auth.token_is_live(token) is False:
+        print("Upstox token is expired. Run: uv run tbrain login"); return 2
+    keys = {"NIFTY": "NSE_INDEX|Nifty 50", "SENSEX": "BSE_INDEX|SENSEX", "VIX": s.vix_key}
+    for name, key in keys.items():
+        if a.only and a.only != name:
+            continue
+        r = pull_index(token, name, key, s.data_dir / "history", end=date.today(), start=date.fromisoformat(a.start))
+        print(f"{name}: wrote {r['rows_written']:,} candles, {len(r['gaps'])} gap(s)")
+    return 0
+
+
 def cmd_ui(s: Settings, a) -> int:
     from tbrain.ui.server import serve
     serve(s, port=a.port, force_demo=a.demo, open_browser=not a.no_browser)
@@ -187,6 +203,9 @@ def main(argv: list[str] | None = None) -> int:
     x.add_argument("--port", type=int, default=8765)
     x.add_argument("--demo", action="store_true", help="force replay of the latest probe")
     x.add_argument("--no-browser", action="store_true")
+    x = sub.add_parser("history", help="research: pull 1-minute index candles (Upstox V3, from Jan 2022) into data/history/")
+    x.add_argument("--from", dest="start", default="2022-01-01", help="first day, YYYY-MM-DD (API starts Jan 2022)")
+    x.add_argument("--only", choices=["NIFTY", "SENSEX", "VIX"], default=None)
     x = sub.add_parser("mongo", help="MongoDB: ping, or import saved calls/shadows/sessions (idempotent)")
     x.add_argument("action", choices=["ping", "import"])
     x.add_argument("--date", default=None, help="day to import (default today)")
@@ -204,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return {"login": cmd_login, "check": cmd_check, "instruments": cmd_instruments, "probe": cmd_probe,
                 "record": cmd_record, "report": cmd_report, "ui": cmd_ui, "review": cmd_review, "backtest": cmd_backtest,
-                "mongo": cmd_mongo, "web": cmd_web, "orderserver": cmd_orderserver}[a.cmd](s, a)
+                "mongo": cmd_mongo, "web": cmd_web, "orderserver": cmd_orderserver, "history": cmd_history}[a.cmd](s, a)
     except Exception as e:  # concise errors; no secrets are ever in messages
         print(f"error: {e}", file=sys.stderr)
         return 1
