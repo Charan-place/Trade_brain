@@ -43,4 +43,20 @@ three mode presets; opening-window cutoffs. At least a dozen variants were exami
 "improvements" found there count as validated.
 
 ## Amendments
-(none)
+**2026-11-13 (before any multi-year result was produced; only a 10-day API sanity check had been seen)** - implementation
+details fixed so they cannot be chosen after the fact:
+- Entries are at the NEXT bar's open after the signal bar closes; exits at a bar close. No signal bar's own price is used.
+- H4: 10-minute cooldown after any event (mirrors the engine), signals between 09:45 and 14:45, 14-bar mean true range as
+  ATR, 60-minute move measured as close[t] - close[t-59] (floored at the first bar of the day), horizons 5/15/30 bars.
+- H3: first close beyond the 09:15-09:29 range after 09:30, at most one trade per day, exit at the earlier of +30 bars or 15:14.
+- H1/H2 targets: last 30 minutes = open(15:00) to close(15:29); day move = open(09:45) to close(15:14).
+- Direction p-values: two-sided, from 10,000 random-direction (sign-flip) draws. The day-block bootstrap interval must
+  also exclude zero. Both are required.
+- H5/H7 use 1,000 label shuffles across days. Volatility regime = trailing 20-day close-to-close std versus the
+  expanding median of all earlier days' values (no look-ahead).
+- Cost hurdle is applied in basis points so both indices share it: 1.0 bp per round trip (2.5 NIFTY points at about 24,500).
+- Expiry calendar for H7 is an UNVERIFIED assumption (NIFTY Thursday before 2025-09-01 and Tuesday after; SENSEX Friday
+  before 2025-09-01 and Thursday after; a nominal expiry with no candles moves to the previous trading day). H7 is
+  informational only and gates nothing.
+- Days with fewer than 360 session bars (half days, Muhurat, data gaps) are excluded and counted in the report.
+- The loader refuses to read FINAL-period dates unless explicitly opened.

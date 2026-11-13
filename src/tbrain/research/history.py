@@ -17,6 +17,7 @@ from pathlib import Path
 BASE = "https://api.upstox.com/v3/historical-candle"
 FIRST_MONTH = date(2022, 1, 1)
 COLUMNS = ("ts", "open", "high", "low", "close", "volume", "oi")
+USER_AGENT = "tbrain-research/1.0 (personal research client)"
 
 
 def month_windows(start: date, end: date) -> list[tuple[date, date]]:
@@ -50,7 +51,9 @@ def parse_candles(payload: dict) -> list[list]:
 
 def fetch_month(token: str, instrument_key: str, frm: date, to: date, retries: int = 4, pause_s: float = 0.4) -> list[list]:
     url = candle_url(instrument_key, frm, to)
-    req = urllib.request.Request(url, headers={"Accept": "application/json", "Authorization": f"Bearer {token}"})
+    # The host's WAF rejects the default "Python-urllib" signature (Cloudflare 1010); an honest client name is accepted.
+    req = urllib.request.Request(url, headers={"Accept": "application/json", "Authorization": f"Bearer {token}",
+                                               "User-Agent": USER_AGENT})
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
