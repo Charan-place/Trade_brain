@@ -150,6 +150,116 @@ def h4_trades(days: list[Day], horizon: int) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- family 2: previous-day levels (docs/RESEARCH_PREREGISTRATION.md)
+def _last(a: np.ndarray) -> float:
+    ok = ~np.isnan(a)
+    return float(a[ok][-1]) if ok.any() else float("nan")
+
+
+def _prev_levels(days: list[Day], i: int):
+    """(PDH, PDL, PDC) of the previous loaded day, or None for the first day of a split."""
+    if i == 0:
+        return None
+    p = days[i - 1]
+    return float(np.nanmax(p.h)), float(np.nanmin(p.l)), _last(p.c)
+
+
+def _hold_trade(d: Day, t: int, direction: int, hold: int = 30):
+    entry, ex = d.o[t + 1], d.c[min(t + hold, idx(15, 14))]
+    return None if (np.isnan(entry) or np.isnan(ex)) else (direction * (ex - entry), entry)
+
+
+def p2_p3_trades(days: list[Day]) -> tuple[dict, dict, dict]:
+    """P2 break (continuation), P3 failed break (fade), and the P2 direction per day (used by P7)."""
+    brk, fade, brk_dir = {}, {}, {}
+    for i, d in enumerate(days):
+        lv = _prev_levels(days, i)
+        if lv is None:
+            continue
+        pdh, pdl, _ = lv
+        b = f = None
+        for t in range(idx(9, 30), idx(14, 45) + 1):
+            c, pc = d.c[t], d.c[t - 1]
+            if np.isnan(c) or np.isnan(pc):
+                continue
+            if b is None and ((c > pdh and pc <= pdh) or (c < pdl and pc >= pdl)):
+                brk_dir[d.date] = 1 if c > pdh else -1
+                b = _hold_trade(d, t, brk_dir[d.date])
+            if f is None and ((d.h[t] > pdh and c < pdh) or (d.l[t] < pdl and c > pdl)):
+                f = _hold_trade(d, t, -1 if (d.h[t] > pdh and c < pdh) else 1)
+            if b is not None and f is not None:
+                break
+        if b:
+            brk[d.date] = [b]
+        if f:
+            fade[d.date] = [f]
+    return brk, fade, brk_dir
+
+
+def p4_trades(days: list[Day]) -> dict:
+    out = {}
+    for i, d in enumerate(days):
+        lv = _prev_levels(days, i)
+        if lv is None or np.isnan(lv[2]):
+            continue
+        gap = d.o[idx(9, 15)] / lv[2] - 1
+        entry, ex = d.o[idx(9, 45)], d.c[idx(12, 0) - 1]
+        if np.isnan(gap) or abs(gap) < 0.003 or np.isnan(entry) or np.isnan(ex):
+            continue
+        out[d.date] = [(-_sgn(gap) * (ex - entry), entry)]
+    return out
+
+
+def _day_move(d: Day, direction: int):
+    entry, ex = d.o[idx(9, 45)], d.c[idx(15, 14)]
+    return None if (direction == 0 or np.isnan(entry) or np.isnan(ex)) else (direction * (ex - entry), entry)
+
+
+def p5_p6_trades(days: list[Day]) -> tuple[dict, dict, dict]:
+    t1, t5, clv = {}, {}, {}
+    closes = [_last(d.c) for d in days]
+    for i, d in enumerate(days):
+        lv = _prev_levels(days, i)
+        if lv is None:
+            continue
+        pdh, pdl, pdc = lv
+        for store, back in ((t1, 2), (t5, 6)):
+            if i >= back:
+                r = _day_move(d, _sgn(pdc / closes[i - back] - 1))
+                if r:
+                    store[d.date] = [r]
+        if pdh > pdl:
+            loc = (pdc - pdl) / (pdh - pdl)
+            r = _day_move(d, 1 if loc >= 0.8 else -1 if loc <= 0.2 else 0)
+            if r:
+                clv[d.date] = [r]
+    return t1, t5, clv
+
+
+def p7_trades(days: list[Day]) -> dict:
+    """P2 break kept only when the five-day trend (PDC vs the close 5 days before it) points the same way."""
+    brk, _, brk_dir = p2_p3_trades(days)
+    closes = [_last(d.c) for d in days]
+    return {d.date: brk[d.date] for i, d in enumerate(days)
+            if d.date in brk and i >= 6 and _sgn(closes[i - 1] / closes[i - 6] - 1) == brk_dir[d.date]}
+
+
+def run_family2(history_dir: Path, splits=("train", "validate"), open_final: bool = False, log=print) -> dict:
+    out = {}
+    for index in ("NIFTY", "SENSEX"):
+        for split in splits:
+            days, info = load_days(history_dir, index, splits=(split,), open_final=open_final)
+            log(f"{index} {split}: {info['days']} days")
+            brk, fade, _ = p2_p3_trades(days)
+            t1, t5, clv = p5_p6_trades(days)
+            gens = {"P2 PDH/PDL break": brk, "P3 PDH/PDL failed break fade": fade, "P4 gap fill": p4_trades(days),
+                    "P5a prior-day trend": t1, "P5b five-day trend": t5, "P6 prior close location": clv,
+                    "P7 trend-aligned break": p7_trades(days)}
+            tests = [r for nm, tr in gens.items() if (r := evaluate(f"{index} {nm}", tr))]
+            out[(index, split)] = {"tests": tests, "info": info}
+    return out
+
+
 # ---------------------------------------------------------------- statistics
 @dataclass
 class Result:
@@ -329,8 +439,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Run the pre-registered price-only edge tests (train + validate only).")
     ap.add_argument("--history", default="data/history")
     ap.add_argument("--out", default="data/research")
+    ap.add_argument("--family", type=int, choices=(1, 2), default=1)
     a = ap.parse_args(argv)
-    out = run_family(Path(a.history))
+    out = (run_family2 if a.family == 2 else run_family)(Path(a.history))
     rows = judge(out)
     n_tests = len(rows)
     print(f"\nTests in the Holm family: {n_tests}. PASS requires Holm p<0.05 + interval excluding 0 on TRAIN, same sign + interval"
@@ -342,11 +453,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{r['test']:34s} {r['train_n']:6d} {r['train_bp']:+8.2f} [{r['train_ci'][0]:+.2f},{r['train_ci'][1]:+.2f}] "
               f"{r['p']:7.4f} {r['p_holm']:7.4f} {v:>24s}  {tag}")
     print("\nH5 volatility regime and H7 expiry splits (diff of mean bp, label-shuffle p, informational):")
-    for (ix, sp), v in out.items():
+    for (ix, sp), v in (out.items() if a.family == 1 else []):
         for k, d in {**v["vol"], **v["expiry"]}.items():
             print(f"  {ix} {sp:8s} {k:28s} diff={d['diff']:+.2f}bp p={d['p']:.3f} (n_high/yes={d['n_high']}, n_low/no={d['n_low']})")
     Path(a.out).mkdir(parents=True, exist_ok=True)
-    Path(a.out, "edge_results_train_validate.json").write_text(json.dumps(rows, indent=1, default=str))
+    Path(a.out, "edge_results_train_validate.json" if a.family == 1 else "edge_results_family2.json").write_text(json.dumps(rows, indent=1, default=str))
     print(f"\nPASS count: {sum(r['PASS'] for r in rows)} of {n_tests}. FINAL period untouched.")
     return 0
 

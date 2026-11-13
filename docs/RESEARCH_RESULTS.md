@@ -37,3 +37,23 @@ it into a net edge by itself. This agrees with the live null on 223 calls.
 ## Not tested here (cannot be tested on index candles)
 VWAP, cumulative volume delta, futures OI, order-book imbalance, large-print and option-writer clues; any option P&L (theta,
 IV, spread). The earlier research found no credible evidence for those clues either, but this run does not settle them.
+
+# Run 2 (2026-11-13): family 2, previous-day levels and trend (14 tests, protocol frozen in commit 8d55496 before the code)
+**0 of 14 pass.** TRAIN + VALIDATE only; FINAL still sealed. Cumulative tests across both families: 50.
+
+| Test (NIFTY / SENSEX) | Train bp [95% CI] | Validate bp [95% CI] |
+|---|---|---|
+| P2 break of prior-day high/low, continuation | -0.59 [-2.54,+1.36] / -1.68 [-3.73,+0.36] | +3.14 [-0.44,+6.68] / +0.78 [-3.06,+4.47] |
+| P3 failed break, fade | +2.06 [-0.05,+4.22] / +2.12 [-0.13,+4.36] | -1.84 [-5.65,+1.92] / -2.25 [-5.75,+1.29] |
+| P4 gap fill (gap >= 0.3%) | -1.12 / -1.26 (intervals span 0) | -0.67 / -2.31 (intervals span 0) |
+| P5a prior-day trend | +1.94 [-3.06,+6.96] / +3.48 [-1.55,+8.46] | +7.11 [-0.46,+14.68] / +8.03 [+0.44,+15.56] |
+| P5b five-day trend | -1.26 / -2.96 (intervals span 0) | -2.27 / -2.60 (intervals span 0) |
+| P6 prior close location | +1.31 / +2.65 (intervals span 0) | +6.45 / +11.40 [+0.66,+22.26] |
+| P7 trend-aligned break | -0.13 / -1.59 (intervals span 0) | +4.18 [+0.12,+8.40] / +0.74 |
+
+Reading: no test is significant on TRAIN after Holm (best raw p 0.06; Holm 0.83). Signs flip between TRAIN and VALIDATE for P2, P3,
+P5b and P7 on NIFTY, which is what noise looks like. The three VALIDATE intervals that exclude zero (NIFTY P7, SENSEX P5a, SENSEX P6)
+sit among 14 checks where about one is expected by chance, and they were not significant on TRAIN, so they are not findings. The only
+same-sign-both-periods hint is the prior-day-trend continuation (P5a, positive on both indices in both periods, +2 to +8 bp, intervals
+mostly spanning zero). That is a candidate for the sealed FINAL period only if the owner wants one more test, with real option costs.
+Prior-day high, low, close and trend carry no tradable edge on this evidence.

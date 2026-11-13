@@ -84,3 +84,37 @@ def test_holm_is_monotone_and_never_below_the_raw_p():
     adj = [r.p_holm for r in rs]
     assert adj == sorted(adj) and all(a >= r.p_two_sided for a, r in zip(adj, rs))
     assert adj[0] == pytest.approx(0.004)
+
+
+def _level_day(d: str, base: float, wiggle: float, rng, drift_after_open: float = 0.0) -> E.Day:
+    step = rng.normal(0, wiggle, E.N_BARS)
+    step[E.idx(9, 31):E.idx(15, 0)] += drift_after_open
+    c = base + np.cumsum(step)
+    o = np.concatenate(([base], c[:-1]))
+    return E.Day(d, o, np.maximum(o, c) + 0.1, np.minimum(o, c) - 0.1, c)
+
+
+def test_prior_day_levels_use_only_the_previous_day_and_skip_the_first_day():
+    flat = lambda d, v: E.Day(d, *(np.full(E.N_BARS, v),) * 4)            # noqa: E731
+    days = [flat("2023-01-02", 100.0), flat("2023-01-03", 110.0)]
+    assert E._prev_levels(days, 0) is None
+    assert E._prev_levels(days, 1) == (100.0, 100.0, 100.0)
+    brk, fade, dirs = E.p2_p3_trades(days)
+    assert brk == {} and fade == {} and dirs == {}                      # day 0 skipped; day 1 never makes a FRESH cross
+
+
+def test_planted_breakout_continuation_is_found_in_p2_but_not_in_noise():
+    rng = np.random.default_rng(11)
+    out_planted, out_noise = {}, {}
+    for planted, store in ((True, out_planted), (False, out_noise)):
+        days, dt, price = [], date(2023, 1, 2), 20000.0
+        while len(days) < 260:
+            if dt.weekday() < 5:
+                d = _level_day(dt.isoformat(), price, 1.0, rng, drift_after_open=0.25 if planted else 0.0)
+                days.append(d)
+                price = float(d.c[-1])
+            dt += timedelta(days=1)
+        brk, _, _ = E.p2_p3_trades(days)
+        store["r"] = E.evaluate("p2", brk, n_boot=2000, n_null=2000)
+    assert out_planted["r"] is not None and out_noise["r"] is not None
+    assert out_planted["r"].mean_bp > out_noise["r"].mean_bp
