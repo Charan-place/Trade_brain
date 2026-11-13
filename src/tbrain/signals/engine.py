@@ -104,7 +104,8 @@ def _fmt(x: float | None, d: int = 2) -> str:
 # on PREMIUM turnover (entry_px + exit_px) x lot, not notional - these are the actual numbers the earlier flat
 # cost_per_lot_inr=40 placeholder didn't include (its own comment admitted as much).
 BROKERAGE_PER_ORDER_INR = 20.0       # flat, most discount brokers; 2 orders (buy + sell) per round trip
-STT_SELL_PREMIUM_RATE = 0.00125      # STT on options premium, charged on the SELL leg only (2026 rate: 0.125%)
+STT_SELL_PREMIUM_RATE = 0.0015       # STT on options premium, SELL leg only. 0.15% since 1 Apr 2026 per broker notices (not yet
+                                     # confirmed against the NSE circular); the higher rate is the conservative choice
 EXCH_TXN_RATE = 0.0003503            # NSE/BSE transaction charges, both legs, on premium turnover
 SEBI_FEE_RATE = 0.0000010            # negligible but real
 STAMP_DUTY_BUY_RATE = 0.00003        # stamp duty, BUY leg only, on premium turnover
