@@ -80,3 +80,27 @@ Tests in this family: 7 hypotheses x 2 indices = 14. Cumulative tests across all
 - P7 Trend-aligned prior-day breakout: P2 only when the five-day trend sign agrees with the break direction.
 The first loaded day of each split has no prior day and is skipped. Direction p-values and intervals as in family 1.
 Expected honest outcome stated in advance: the hurdle is 1.0 bp, so a small statistically significant effect is still reported as "no net edge".
+
+## Family 3: order-flow clues on strictly forward data (frozen 2026-11-13, before the code exists)
+The live recorder stores one feature row per index per minute (price, VWAP, futures OI, CVD, buy share, order-book imbalance,
+big-print flow, option-chain fields, and the seven clue flags per side). Family 3 tests whether any single clue predicts the
+next 15 minutes. Only days from 2026-11-16 onward count (the 16 days recorded before the freeze were already looked at while
+tuning and are used for pipeline checks only; no p-value on them is a result).
+- Signal: at minute t, clue k fires long if the bullish side's flag k is true and the bearish side's flag k is false; short if the reverse.
+  Seven clues (vwap, aggression, fut_oi, big_players, order_book, writers, volatility) x NIFTY/SENSEX = 14 tests, one Holm family.
+- Entry at the NEXT minute's recorded spot, exit at the recorded spot 15 minutes later (rows within +-1 minute; otherwise skipped).
+  After a trade for clue k on an index, no new trade for that clue/index for 15 minutes (so trades do not overlap).
+- Same statistics as family 1 (day-block bootstrap interval, sign-flip null, Holm) and same pass rule: Holm p < 0.05, interval excluding
+  zero, |mean| >= 1.0 bp.
+- Sample rule: no test statistic is computed until 60 trading days (counting only days from 2026-11-16) are on file. Before that the tool
+  prints day counts only. It is evaluated once at 60 days. A failure is reported; extending the sample needs a new dated pre-registration.
+
+## Gate A: what a signal profile must show on paper before real money (frozen 2026-11-13)
+Applies to one profile (conservative, balanced or aggressive) at a frozen configuration, scored on calls issued on or after the day the
+real-cost build is deployed and a start date is written in the deploy note. All of the following must hold, otherwise the profile stays OFF:
+1. At least 30 trading days and 150 closed calls.
+2. Real-cost model in force (cost_est_per_lot >= 60 on at least 95% of calls); flat-40 results are rejected as invalid.
+3. Mean net P&L per call > 0 and the day-block bootstrap 95% lower bound > 0.
+4. Mean net P&L per call stays > 0 after removing the 3 best calls.
+5. No single day contributes more than 40% of total net profit.
+Passing Gate A permits live trading at ONE lot with a hard daily loss cap; it does not permit scaling. Failing it is reported plainly.
