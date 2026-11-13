@@ -104,3 +104,7 @@ real-cost build is deployed and a start date is written in the deploy note. All 
 4. Mean net P&L per call stays > 0 after removing the 3 best calls.
 5. No single day contributes more than 40% of total net profit.
 Passing Gate A permits live trading at ONE lot with a hard daily loss cap; it does not permit scaling. Failing it is reported plainly.
+
+**Amendment to family 3, 2026-11-13 (no forward day has been recorded yet, so no result exists):** the `volatility` clue is set on both
+the bullish and bearish side at the same time, so it carries no direction and cannot be tested as long or short. It is dropped.
+Family 3 is 6 clues x 2 indices = 12 tests (cumulative tests across all families: 36 + 14 + 12 = 62).
