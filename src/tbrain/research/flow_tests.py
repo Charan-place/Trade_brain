@@ -144,7 +144,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         for r in out["results"]:
             print(f"{r.name:22s} n={r.n_trades:5d} {r.mean_bp:+6.2f}bp [{r.ci_bp[0]:+.2f},{r.ci_bp[1]:+.2f}] p={r.p_two_sided:.4f} holm={r.p_holm:.4f} {'PASS' if r.extra['PASS'] else ''}")
-        print(f"PASS {sum(r.extra['PASS'] for r in out['results'])} of {out['tests']} (cumulative tests incl. families 1-2: {50 + out["tests"]})")
+        n_pass, n_tests = sum(r.extra["PASS"] for r in out["results"]), out["tests"]
+        print(f"PASS {n_pass} of {n_tests} (cumulative tests incl. families 1-2: {50 + n_tests})")
         return 0
     calls = [c for c in data if c.get("_coll", "calls") == "calls" and (a.mode is None or c.get("mode") == a.mode)]
     g = gate_a(calls, a.start)
